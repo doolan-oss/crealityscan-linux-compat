@@ -48,6 +48,11 @@ Keep the `crealityscan-linux-compat` folder: the menu entry runs from it.
   are in `~/.local/share/crealityscan-linux/data/logs`. Wi-Fi mode and other
   options are in [SETUP.md](docs/SETUP.md).
 
+**Help test it:** this has only been tested on one computer. Whether it worked
+or not, please file a
+[hardware report](https://github.com/doolan-oss/crealityscan-linux-compat/issues/new?template=hardware-report.yml)
+with your distribution and GPU.
+
 To uninstall, delete `~/.local/share/crealityscan-linux`,
 `~/.local/share/applications/crealityscan-linux.desktop` and the
 `crealityscan-linux-compat` folder. Your scans in `~/Documents/CrealityScan` stay.
@@ -68,7 +73,8 @@ point-cloud acquisition, mesh generation, STL export and reopening in
 CrealityScan. With the current hardened launcher and desktop display, a live USB
 scan, STL export to Documents and reopening of moved projects passed (Proton 11.0
 DXVK). With the official DXVK 3.1.1 now pinned and the CI-built helpers, live USB
-scanning worked in every mode the user tried. Other scan modes, extended
+scanning worked in every mode the user tried, at about 80–90 FPS in Laser Lines
+mode on the RX 6800 XT. Other scan modes, extended
 stability and other hardware remain untested; see
 [VALIDATION.md](docs/VALIDATION.md).
 

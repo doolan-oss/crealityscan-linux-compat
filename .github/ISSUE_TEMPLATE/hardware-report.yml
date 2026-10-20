@@ -1,0 +1,87 @@
+name: Hardware report
+description: Tell us whether setup and scanning worked on your computer, even if everything worked.
+title: "[Hardware] <distribution> / <GPU>"
+labels: ["hardware report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! So far this project has been tested on one computer, so reports from other distributions and GPUs are the most useful thing right now, including ones where everything worked.
+
+        **Before pasting any output, remove private details.** Paths can include your username, and CrealityScan's own logs can contain your scanner's Wi-Fi password.
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution and version
+      placeholder: e.g. Ubuntu 24.04, Fedora 41, CachyOS
+    validations:
+      required: true
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop and session
+      options:
+        - KDE Plasma (Wayland)
+        - KDE Plasma (X11)
+        - GNOME (Wayland)
+        - GNOME (X11)
+        - Other (say below)
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: The GPU setup detected is printed as "GPU:" near the start of setup's output.
+      placeholder: e.g. AMD Radeon RX 6800 XT, NVIDIA GeForce RTX 3060
+    validations:
+      required: true
+  - type: dropdown
+    id: opencl
+    attributes:
+      label: OpenCL driver
+      options:
+        - ROCm (AMD)
+        - Rusticl (Mesa)
+        - NVIDIA proprietary driver
+        - Intel compute runtime
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Did setup finish?
+      options:
+        - Yes, it printed PASSED and Done
+        - No, it stopped with an error (paste it below)
+        - No, the diagnostics failed (paste the output below)
+    validations:
+      required: true
+  - type: dropdown
+    id: scanning
+    attributes:
+      label: Did scanning work?
+      options:
+        - Yes, every mode I tried
+        - Partly (say which modes below)
+        - No (describe below)
+        - I didn't get that far
+    validations:
+      required: true
+  - type: input
+    id: modes
+    attributes:
+      label: Scan modes tried and FPS shown
+      placeholder: e.g. Laser Lines about 85 FPS; Speckle about 60 FPS
+  - type: textarea
+    id: output
+    attributes:
+      label: Setup output or error
+      description: The last 20 or so lines from `python3 scripts/creality.py setup`, or the error you saw. Remove private details first.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Other things you noticed, e.g. window behaviour, export, reconnecting the scanner.

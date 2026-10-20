@@ -3,8 +3,9 @@
 Known original setup: CrealityScan 4.3.2, SDK 3.5.3.260921, Pika firmware 1.1.1,
 CachyOS x86-64, RX 6800 XT, ROCm OpenCL, standalone Wine 11 with Proton 11.0's
 DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since
-passed live USB scanning in every mode the user tried (no FPS figure recorded). Prebuilt helpers are built on Ubuntu 24.04 and need glibc 2.39 or
-newer; GPU detection in setup picks one GPU and can be overridden with
+passed live USB scanning in every mode the user tried, at about 80–90 FPS in
+Laser Lines mode, the same as the earlier install. Prebuilt helpers are built
+on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one GPU and can be overridden with
 `--gpu-name`.
 Other scanners, firmware, GPU families, OpenCL stacks and app versions are not
 validated by making configuration portable. The allocation change remains
