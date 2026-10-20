@@ -323,4 +323,12 @@ Passed on the same machine:
   desktop display): the user reported that all scan modes they tried worked
   well. No FPS figure was recorded.
 
-Not yet done: the first `helpers-v*` release and its pin; any Ubuntu machine test.
+- Release `helpers-v1`: the archive's SHA-256 matches its published checksum,
+  and `gh attestation verify` confirms it was built by this repository's
+  `helpers.yml` workflow from the tagged commit.
+- A fresh clone with `helpers-v1` pinned: `python3 scripts/creality.py setup` in a
+  throwaway home downloaded the runner, DXVK and the release helpers, then
+  installed, passed diagnose and wrote the menu entry in 72 seconds, with no
+  compiler.
+
+Not yet done: any Ubuntu machine test.

@@ -22,5 +22,10 @@
       "d3d11.dll": "aaab753627957ef4d192d91c2816400e486fc0131b15a8d4bdae1ecf4b1a21b8"
     }
   ],
-  "runner_tree_sha256": "bf7464300c5fdb75dfb01c954a2201c68388a44ce70189b81df63dbacc753ab4"
+  "runner_tree_sha256": "bf7464300c5fdb75dfb01c954a2201c68388a44ce70189b81df63dbacc753ab4",
+  "helpers": {
+    "version": "helpers-v1",
+    "url": "https://github.com/doolan-oss/crealityscan-linux-compat/releases/download/helpers-v1/crealityscan-helpers-v1.tar.gz",
+    "sha256": "cc46f66e4531013081c022602c0e6909875dda07de0538a2dffec45c39e4cd1b"
+  }
 }
