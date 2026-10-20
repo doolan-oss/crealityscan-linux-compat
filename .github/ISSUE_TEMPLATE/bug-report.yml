@@ -1,0 +1,40 @@
+name: Bug report
+description: Something went wrong while setting up, starting or using CrealityScan.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before pasting any output, remove private details.** Paths can include your username, and CrealityScan's own logs can contain your scanner's Wi-Fi password.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution, desktop and GPU
+      placeholder: e.g. Ubuntu 24.04, GNOME Wayland, NVIDIA RTX 3060
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Scanner connection
+      options:
+        - USB
+        - Wi-Fi
+        - Not connected / not relevant
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error or output
+      description: |
+        The error shown in the terminal or desktop notification. For problems while the app runs, the newest folder in `~/.local/share/crealityscan-linux/data/logs/` has `wine.log` and `Player.log`; paste only the relevant lines.
+      render: text

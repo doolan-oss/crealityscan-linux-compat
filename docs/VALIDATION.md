@@ -332,3 +332,26 @@ Passed on the same machine:
   compiler.
 
 Not yet done: any Ubuntu machine test.
+
+## New-user path and scan rate — 21 October 2026
+
+Passed (user, same machine): a fresh clone in the home folder, the installer in
+Downloads and `python3 scripts/creality.py setup`, then **CrealityScan** opened
+from the KDE app menu and a live USB scan. This is the path the README
+describes, including the menu launch.
+
+Scan rate, user-reported, Laser Lines Scan mode with the same object in one
+session:
+
+| Install | Window | Reported FPS |
+|---|---|---|
+| Earlier hardened install (Proton 11.0 DXVK, locally built helpers) | Maximised, 3440×1408 | 80–90 |
+| Setup-made install (DXVK 3.1.1, `helpers-v1` release helpers) | Maximised, 3440×1408 | 80–90 |
+| Setup-made install | Smaller window | 80–90 |
+
+Logs from the two installs show the same camera capture rate (about 239 frames
+per second dequeued) and the same brief frameset-queue drops at stream start
+only. Neither DXVK 3.1.1, the CI-built helpers nor window size changed the rate.
+The earlier ~95 FPS (18 October, Gamescope at 1280×800) and ~110 FPS (before
+hardening) were single readings in other sessions and scenes; that difference
+has not been isolated.
