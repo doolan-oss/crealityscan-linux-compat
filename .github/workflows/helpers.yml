@@ -86,6 +86,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat > notes.md <<EOF
+          Prebuilt helper programs for this project: the USB camera bridge DLLs, OpenCL fixes and diagnostics.
+
+          **You don't need to download anything here.** To install CrealityScan on Linux, follow the [Install steps in the README](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}#install). Setup downloads this archive and checks its SHA-256 automatically once the release is pinned in \`config/versions.lock.json\`.
+
+          The "Source code" archives below are a snapshot of the commit these helpers were built from. Install from the main branch instead.
+
+          - Built by this repository's \`helpers\` workflow on Ubuntu 24.04 from ${GITHUB_SHA}.
+          - Verify the build provenance: \`gh attestation verify $PACKAGE --repo ${GITHUB_REPOSITORY}\`
+          - Licenses for the bundled components are in the archive's \`licenses/\` folder; see THIRD_PARTY_NOTICES.md.
+          EOF
           gh release create "$GITHUB_REF_NAME" "$PACKAGE" "$PACKAGE.sha256" \
-            --title "Prebuilt helpers $GITHUB_REF_NAME" \
-            --notes "Built from ${GITHUB_SHA} by this repository's helpers workflow on Ubuntu 24.04. Verify with: gh attestation verify $PACKAGE --repo ${GITHUB_REPOSITORY}"
+            --title "Prebuilt helpers $GITHUB_REF_NAME" --notes-file notes.md
