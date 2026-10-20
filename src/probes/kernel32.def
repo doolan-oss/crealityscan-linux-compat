@@ -1,0 +1,11 @@
+LIBRARY KERNEL32.dll
+EXPORTS
+LoadLibraryA
+GetProcAddress
+GetStdHandle
+WriteFile
+GetEnvironmentVariableA
+GetModuleFileNameA
+GetLastError
+ExitProcess
+Sleep

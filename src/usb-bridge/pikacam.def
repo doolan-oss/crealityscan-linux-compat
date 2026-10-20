@@ -1,0 +1,7 @@
+LIBRARY pikacam
+EXPORTS
+ MFEnumDeviceSources
+ MFCreateDeviceSource
+ PikaBridgeLiveSources
+
+ PikaBridgePrepareSDK

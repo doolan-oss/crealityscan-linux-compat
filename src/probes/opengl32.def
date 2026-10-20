@@ -1,0 +1,10 @@
+LIBRARY OPENGL32.dll
+EXPORTS
+wglCreateContext
+wglMakeCurrent
+wglDeleteContext
+glGetString
+glClearColor
+glClear
+glReadPixels
+glGetError

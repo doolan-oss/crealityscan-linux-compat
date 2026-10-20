@@ -1,0 +1,26 @@
+{
+  "crealityscan_version": "4.3.2",
+  "installer_sha256": "03135d3fbdb20947332723206169e5945df7c9989461507e1f36d128dd385b20",
+  "sdk_sha256": "d36c0e8ea1e2123c5bc8288d8676608da255bffd8063e2b051dcf39c3fa79231",
+  "runner_version": "wine-11.0-g8c33a428032 (Proton)",
+  "runner_archive_url": "https://github.com/Kron4ek/Wine-Builds/releases/download/proton-exp-11.0/wine-proton-exp-11.0-amd64.tar.xz",
+  "runner_archive_sha256": "75397ffd9d5af889a81209be138a5891d222fc17dc6ca40009df2e8cd2838136",
+  "wine_sha256": "15aac501516cb973e29ab32456eed4ca684fb023521a8a885b47856a1fbf3f75",
+  "wineserver_sha256": "6e635fe78cafbb1eb2bb6ab83b4a9b2cc4f8165037b6aa8fc6f7714d84bbce94",
+  "mf_sha256": "90fa33522659448af00d4aad54ffb08f70c1b0ba4a4685e32868b4503fcefafc",
+  "dxvk_version": "v3.1.1 (official release)",
+  "dxvk_archive_url": "https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz",
+  "dxvk_archive_sha256": "40565b4a724aadc4433fa4e010b4b23916d9b1f1baeee64e17186db94f54e608",
+  "dxvk": {
+    "dxgi.dll": "e3c1178eb7f0dd59f91bcfcc257549e5b9cfdb5e8508719293de7f8704f53160",
+    "d3d11.dll": "0a203b6255c893430f0a8461c618962df04e62aa41538d5a875b21868317cf9f"
+  },
+  "dxvk_also_accepted": [
+    {
+      "version": "v2.7.1-498-ga6764047e587178 (matching Proton 11.0 build)",
+      "dxgi.dll": "a5b73d280e42b4d972ce65c9e7b76fe2ef34077d4347a8468ed57c3b5681c0d3",
+      "d3d11.dll": "aaab753627957ef4d192d91c2816400e486fc0131b15a8d4bdae1ecf4b1a21b8"
+    }
+  ],
+  "runner_tree_sha256": "bf7464300c5fdb75dfb01c954a2201c68388a44ce70189b81df63dbacc753ab4"
+}

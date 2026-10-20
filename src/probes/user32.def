@@ -1,0 +1,7 @@
+LIBRARY USER32.dll
+EXPORTS
+CreateWindowExA
+GetDC
+ReleaseDC
+DestroyWindow
+UpdateWindow
