@@ -131,7 +131,8 @@ def set_aside_incomplete(c):
         os.rename(data, aside)
     finally:
         lock.close()
-    print(f'An earlier, unfinished install was moved aside to {aside}.\n'
+    print(f'An earlier install that setup could not verify (unfinished, or made from another copy of\n'
+          f'this project) was moved aside to {aside}.\n'
           f'Your scans in {c["exports_dir"]} are not affected. Delete it once setup has finished.', flush=True)
     return aside
 

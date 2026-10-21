@@ -78,8 +78,11 @@ prebuilt release means trusting this repository's GitHub Actions build:
 `gh attestation verify <archive> --repo doolan-oss/crealityscan-linux-compat`
 checks its build provenance, and `build` produces the helpers from source instead.
 
-Fresh installation creates a host-side baseline under ignored `.local-trust/`,
-keyed by the absolute data directory. That directory is never mounted into Wine.
+Fresh installation creates a host-side baseline in
+`~/.local/share/crealityscan-linux/trust/` (under `$XDG_DATA_HOME` if set), keyed
+by the absolute data directory. That directory is never mounted into Wine, and a
+data directory may not contain it. Installs made before this location was used
+keep their baseline in the checkout's ignored `.local-trust/`, which is still read.
 The session lock is also host-side, so the app cannot replace it to permit a
 second session. Host log writes, ownership-marker reads and post-install copies
 traverse directories without following links. Log/status outputs are exclusive;
@@ -94,7 +97,9 @@ also records the trusted helper build. Empty baselines are rejected.
 The old writable `data_dir/installation.json` is not a trust source. Old prefixes
 are not automatically adopted or upgraded: use a **new data directory** and fresh
 installation. Do not regenerate hashes to bless a potentially modified prefix.
-Keep `.local-trust/` with this source checkout; moving data changes its identity.
+Moving a data directory changes its identity. When `setup` finds a populated
+prefix it has no baseline for, it renames that data directory to
+`<name>.previous-<time>` and installs afresh; it never adopts or deletes it.
 
 This is executable-integrity protection, not authentication of all mutable Wine
 state. Registry settings, projects, shaders/assets and app settings are not a
