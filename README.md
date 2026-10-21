@@ -44,6 +44,9 @@ Keep the `crealityscan-linux-compat` folder: the menu entry runs from it.
   To import a model, copy it into that folder first.
 - **Startup:** if the window opens behind other windows, click it. The app pauses
   loading while it is in the background.
+- **Setup stopped with an error?** Fix the cause and run setup again. A
+  half-finished install is moved aside to `data.previous-…` automatically
+  (delete it once setup finishes); your scans are not touched.
 - **Problems:** if the app can't start you'll usually get a desktop notification; logs
   are in `~/.local/share/crealityscan-linux/data/logs`. Wi-Fi mode and other
   options are in [SETUP.md](docs/SETUP.md).

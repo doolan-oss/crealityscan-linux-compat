@@ -355,3 +355,23 @@ only. Neither DXVK 3.1.1, the CI-built helpers nor window size changed the rate.
 The earlier ~95 FPS (18 October, Gamescope at 1280×800) and ~110 FPS (before
 hardening) were single readings in other sessions and scenes; that difference
 has not been isolated.
+
+## Rerunning setup — 22 October 2026
+
+A user's rerun of `setup` from a fresh clone stopped with "Incomplete/populated
+prefix", because install baselines were stored in the checkout and the new clone
+could not see the earlier install. Reproduced with the previous code: a second
+clone running setup against the first clone's install failed the same way.
+
+With the fix (baselines in `~/.local/share/crealityscan-linux/trust/`, and setup
+moving aside installs it cannot verify), in a throwaway home on the same machine:
+
+- The install left behind by the previous code, with no findable baseline, was
+  moved aside to `data.previous-<time>` intact. Setup then reinstalled and
+  diagnose passed.
+- A further fresh clone recognised the install ("Already installed; verified"),
+  diagnose passed and the menu entry was rewritten to the new clone.
+- An existing install with its baseline in the checkout's `.local-trust/` still
+  verifies.
+- Unit tests cover moving aside only folders with the ownership marker and no
+  baseline, never deleting, and reading the old baseline location.

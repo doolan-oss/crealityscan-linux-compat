@@ -6,7 +6,11 @@ from pathlib import Path
 import stat
 from exports import EXPORTS_MOUNT
 
-TRUST_ROOT = Path(__file__).resolve().parents[1] / '.local-trust'
+# Beside setup's data folder, never inside a data_dir, so a re-cloned or moved
+# checkout still recognises its installs. Installs made before this used the
+# checkout's .local-trust/, which is still read.
+TRUST_ROOT = Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local/share') / 'crealityscan-linux' / 'trust'
+LEGACY_TRUST_ROOT = Path(__file__).resolve().parents[1] / '.local-trust'
 
 
 def tree_manifest(root):
@@ -37,7 +41,9 @@ def tree_digest(root):
 
 def installation_path(c):
     key = hashlib.sha256(str(c['data_dir']).encode()).hexdigest()
-    return TRUST_ROOT / (key + '.json')
+    legacy = LEGACY_TRUST_ROOT / (key + '.json')
+    current = TRUST_ROOT / (key + '.json')
+    return legacy if legacy.exists() and not current.exists() else current
 
 
 def code_manifest(prefix):
@@ -74,7 +80,7 @@ def code_manifest(prefix):
 
 def save_installation(c, build):
     p = installation_path(c)
-    p.parent.mkdir(mode=0o700, exist_ok=True)
+    p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with p.open('x') as f:
         json.dump({'schema': 2, 'files': code_manifest(c['prefix']), 'build': build}, f, indent=2)
         f.write('\n')

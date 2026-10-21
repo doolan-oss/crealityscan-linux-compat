@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from common import ROOT, load, sandbox
+import integrity
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
@@ -20,7 +21,7 @@ def main():
         (c['prefix']/'home').mkdir()
         canary=root/'outside-state-secret';canary.write_text('harmless secret')
         executable=c['prefix']/'dummy.dll';executable.write_bytes(b'dummy code')
-        probes={'canary':str(canary),'trust':str(ROOT/'.local-trust'),
+        probes={'canary':str(canary),'trust':str(integrity.TRUST_ROOT),'legacy_trust':str(integrity.LEGACY_TRUST_ROOT),
                 'state':str(c['data_dir']),'code':str(executable),
                 'network':os.readlink('/proc/self/ns/net')}
         code='''import errno,json,os
@@ -28,6 +29,7 @@ from pathlib import Path
 p=json.loads(os.environ['TEST_PATHS'])
 assert not Path(p['canary']).exists()
 assert not Path(p['trust']).exists()
+assert not Path(p['legacy_trust']).exists()
 assert not Path('/etc/shadow').exists()
 assert not Path('/tmp/.X11-unix').exists()
 assert not Path('/dev/video0').exists()

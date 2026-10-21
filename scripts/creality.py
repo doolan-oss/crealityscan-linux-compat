@@ -125,7 +125,8 @@ def main():
         print('runner:',fetch.runner(args.dir));print('dxvk:',fetch.dxvk(args.dir));return
     if args.command=='setup':
         c=onboard.prepare(args.config,args.installer,args.gpu_name)
-        dependencies(c,installer=True);onboard.helpers(c,build);install(c);diagnose(c);onboard.finish(args.config);return
+        dependencies(c,installer=True);onboard.helpers(c,build);onboard.set_aside_incomplete(c)
+        install(c);diagnose(c);onboard.finish(args.config);return
     if args.command=='configure':
         c=json.loads((ROOT/'config/config.example.json').read_text())
         for key in ('runner','installer','dxvk_dir','data_dir'):c[key]=str(Path(getattr(args,key)).expanduser().resolve())

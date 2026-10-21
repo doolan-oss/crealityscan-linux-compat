@@ -1,10 +1,11 @@
 """One-command setup for new users: fetch, configure, install, check, add a menu entry."""
+import datetime
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
-from common import LOCK, ROOT, digest, load
+from common import LOCK, ROOT, digest, load, owned
 from exports import default_dir
 import fetch
 import gpuinfo
@@ -112,6 +113,28 @@ def prepare(config, installer=None, gpu_name=None):
     print('GPU:', gpu_name, '| Installer:', installer, flush=True)
     write_config(config, gpu_name, installer)
     return load(config)
+
+
+def set_aside_incomplete(c):
+    """Move aside an install setup cannot use: a populated prefix with no saved
+    baseline (a failed earlier attempt, or one made from another copy of this
+    project). Only folders carrying this project's ownership marker are moved;
+    nothing is deleted. Scans and projects live in the exports folder."""
+    from integrity import installation_path
+    data, prefix = c['data_dir'], c['prefix']
+    if installation_path(c).exists() or not (data/'community-owner.json').is_file() \
+            or prefix.is_symlink() or not prefix.is_dir() or not any(prefix.iterdir()):
+        return None
+    lock = owned(c)  # refuses while another session holds this install
+    try:
+        aside = data.with_name(f'{data.name}.previous-{datetime.datetime.now():%Y%m%d-%H%M%S}')
+        os.rename(data, aside)
+    finally:
+        lock.close()
+    print(f'An earlier install that setup could not verify (unfinished, or made from another copy of\n'
+          f'this project) was moved aside to {aside}.\n'
+          f'Your scans in {c["exports_dir"]} are not affected. Delete it once setup has finished.', flush=True)
+    return aside
 
 
 def helpers(c, build):

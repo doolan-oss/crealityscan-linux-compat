@@ -1,5 +1,6 @@
 """Configuration and sandbox boundaries. No shell evaluation of config values."""
 import fcntl,hashlib,json,os,subprocess
+import integrity
 from integrity import tree_digest, installation_path
 from display import MODES
 from exports import EXPORTS_MOUNT, check_dir, default_dir
@@ -29,7 +30,7 @@ def load(path):
     if c['display'] not in MODES:raise ValueError('display must be "desktop" or "isolated"')
     c['prefix']=c['data_dir']/'prefix'
     # Never expose the checkout/trust store through the writable state mount.
-    protected=(ROOT, installation_path(c).parent, c['runner'])
+    protected=(ROOT, integrity.TRUST_ROOT, installation_path(c).parent, c['runner'])
     for p in protected:
         if p.is_relative_to(c['data_dir']) or c['data_dir'].is_relative_to(p):
             raise ValueError('data_dir must be separate from source, trust and runner directories')

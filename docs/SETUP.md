@@ -90,8 +90,10 @@ This exclusively creates ignored `config.local.json`; it refuses overwrite.
 Edit that JSON before continuing. Paths with spaces are supported. `data_dir`
 must be new/empty and must not point to an existing working prefix or project.
 The setup creates `prefix/`, logs and an ownership marker beneath it. A separate
-host-only installation baseline and session lock are stored under ignored `.local-trust/` in this
-checkout. That store is not exposed to Wine. Keep it with the source checkout.
+host-only installation baseline and session lock are stored in
+`~/.local/share/crealityscan-linux/trust/`, so re-cloning or moving this checkout
+keeps them. That store is not exposed to Wine. Installs made before it existed
+use the checkout's ignored `.local-trust/`, which is still read.
 A baseline from an older writable `installation.json` is not accepted; choose a
 new data directory and install afresh. Existing prefixes are preserved.
 
@@ -237,6 +239,7 @@ weaker boundary than USB. It is refused unless the local config explicitly sets
 `"allow_host_network": true` after reviewing SECURITY.md. The default is false.
 No network/desktop service settings are changed.
 
-Removal: remove only the newly created data directory
-and its corresponding `.local-trust/<data-directory-hash>.json` baseline. Removing
-the checkout removes its trust store; no working prefix is adopted on the next run.
+Removal: remove only the newly created data directory and its
+`<data-directory-hash>.json` baseline in `~/.local/share/crealityscan-linux/trust/`
+(or the checkout's `.local-trust/` for older installs). A prefix without its
+baseline is never adopted: `install` refuses it and `setup` moves it aside.
