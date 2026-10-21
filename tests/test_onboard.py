@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 import common
 import fetch
+import integrity
 import onboard
 
 
@@ -128,6 +129,46 @@ class OnboardTests(unittest.TestCase):
              self.assertRaisesRegex(RuntimeError, 'OpenCL'):
             onboard.prepare(self.root/'config.json', installer)
         self.assertFalse((self.root/'config.json').exists())
+
+
+class RerunTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        for name, path in (('TRUST_ROOT', self.root/'trust'), ('LEGACY_TRUST_ROOT', self.root/'checkout/.local-trust')):
+            patched = patch.object(integrity, name, path); patched.start(); self.addCleanup(patched.stop)
+
+    def config(self):
+        data = self.root/'share/data'
+        return {'data_dir': data, 'prefix': data/'prefix', 'exports_dir': self.root/'Documents/CrealityScan'}
+
+    def test_unfinished_install_moved_aside_not_deleted(self):
+        c = self.config()
+        common.owned(c, create=True).close()
+        c['prefix'].mkdir(); (c['prefix']/'half-installed.txt').write_text('keep')
+        aside = onboard.set_aside_incomplete(c)
+        self.assertFalse(c['data_dir'].exists())
+        self.assertEqual((aside/'prefix/half-installed.txt').read_text(), 'keep')
+        self.assertTrue(aside.name.startswith('data.previous-'))
+        self.assertIsNone(onboard.set_aside_incomplete(c))
+
+    def test_finished_or_unowned_folders_left_alone(self):
+        c = self.config()
+        c['prefix'].mkdir(parents=True); (c['prefix']/'user-file').write_text('keep')
+        self.assertIsNone(onboard.set_aside_incomplete(c))  # no ownership marker
+        (c['data_dir']/'community-owner.json').write_text(json.dumps({'format': 1, 'owner': 'crealityscan-linux-community'}))
+        baseline = integrity.installation_path(c); baseline.parent.mkdir(parents=True); baseline.write_text('{}')
+        self.assertIsNone(onboard.set_aside_incomplete(c))  # finished install
+        self.assertTrue((c['prefix']/'user-file').exists())
+
+    def test_baseline_found_in_legacy_checkout_store(self):
+        c = self.config()
+        legacy = integrity.LEGACY_TRUST_ROOT/integrity.installation_path(c).name
+        legacy.parent.mkdir(parents=True); legacy.write_text('{}')
+        self.assertEqual(integrity.installation_path(c), legacy)
+        current = integrity.TRUST_ROOT/legacy.name
+        current.parent.mkdir(parents=True); current.write_text('{}')
+        self.assertEqual(integrity.installation_path(c), current)
 
 
 if __name__ == '__main__':
