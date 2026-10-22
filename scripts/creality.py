@@ -179,8 +179,8 @@ def main():
         import collect,survey
         target,launched,app=collect.collect(c,[survey.read(d/'serial') for d in survey.scanners()])
         print('Collected:',launched or 'no launch logs','and',app or 'no app logs')
-        print(f'Saved {target}\nAttach it to your GitHub issue. Serial numbers and your home folder path are replaced;\n'
-              'it still shows your GPU, CPU and Linux setup. You can open the zip to check it first.');return
+        print(f'Saved {target}\nAttach it to your GitHub issue. Serial numbers, Wi-Fi names and passwords, and your home\n'
+              'folder path are replaced; it still shows your GPU, CPU and Linux setup. You can open the zip to check it first.');return
     if args.command=='build':build(c,args.portable)
     elif args.command=='install':install(c)
     elif args.command=='diagnose':diagnose(c)
