@@ -21,6 +21,11 @@ body:
       placeholder: e.g. Ubuntu 24.04, GNOME Wayland, NVIDIA RTX 3060
     validations:
       required: true
+  - type: input
+    id: scanner
+    attributes:
+      label: Scanner model
+      placeholder: e.g. Creality Pika
   - type: dropdown
     id: connection
     attributes:

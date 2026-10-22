@@ -12,7 +12,13 @@ def prepare(c):
     process=subprocess.run(['pgrep','-x','CrealityScan.ex'],capture_output=True)
     if process.returncode!=1:raise RuntimeError('Close other CrealityScan sessions before opening the scanner')
     ds=[d for d in discover()if not c.get('scanner_serial') or d['serial']==c['scanner_serial']]
-    if len(ds)!=1:raise RuntimeError('Expected one Pika; configure scanner_serial if multiple are connected')
+    if not ds:
+        from survey import other_scanners
+        others=other_scanners()
+        if others:raise RuntimeError(f'Found {", ".join(others)}, but only the Creality Pika is supported over USB so far. '
+                                     'Run "python3 scripts/creality.py survey" and share its output in a hardware report so support can be looked into.')
+        raise RuntimeError('No Creality Pika found over USB. Connect it and try again; see docs/USB.md if it is connected.')
+    if len(ds)>1:raise RuntimeError('More than one Pika is connected; set scanner_serial in the config to choose one')
     d=ds[0];nodes=d['nodes'];parent=Path(d['usb_path']);serial=d['serial']
     if not re.fullmatch('[A-Za-z0-9_-]{1,64}',serial):raise RuntimeError('Unexpected serial syntax')
     required=[nodes[k]for k in ('0:0','0:1','2:0','2:1')]

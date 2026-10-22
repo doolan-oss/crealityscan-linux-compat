@@ -10,6 +10,14 @@ body:
 
         **Before pasting any output, remove private details.** Paths can include your username, and CrealityScan's own logs can contain your scanner's Wi-Fi password.
   - type: input
+    id: scanner
+    attributes:
+      label: Scanner model
+      description: Only the Creality Pika works over USB so far. Reports for other models help add them.
+      placeholder: e.g. Creality Pika, CR-Scan Raptor, CR-Scan Otter, Sermoon S1
+    validations:
+      required: true
+  - type: input
     id: distribution
     attributes:
       label: Distribution and version
@@ -79,6 +87,12 @@ body:
     attributes:
       label: Setup output or error
       description: The last 20 or so lines from `python3 scripts/creality.py setup`, or the error you saw. Remove private details first.
+      render: text
+  - type: textarea
+    id: survey
+    attributes:
+      label: Scanner survey (for scanners other than the Pika)
+      description: Connect the scanner by USB, run `python3 scripts/creality.py survey` and paste the output. It shows how the scanner connects and contains no serial numbers.
       render: text
   - type: textarea
     id: notes
