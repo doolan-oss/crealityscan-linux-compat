@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 RUNTIME_ROOT=Path('/run/creality-source')
 LOCK=json.loads((ROOT/'config/versions.lock.json').read_text())
-ENV_KEYS={'OCL_ICD_VENDORS','RUSTICL_ENABLE','ROCR_VISIBLE_DEVICES','DRI_PRIME','DXVK_FILTER_DEVICE_NAME','HSA_ENABLE_SDMA'}
+ENV_KEYS={'OCL_ICD_VENDORS','RUSTICL_ENABLE','ROCR_VISIBLE_DEVICES','DRI_PRIME','DXVK_FILTER_DEVICE_NAME','HSA_ENABLE_SDMA',
+          '__NV_PRIME_RENDER_OFFLOAD','__GLX_VENDOR_LIBRARY_NAME'}
 def digest(p):
     with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def expect(p,h):
@@ -83,6 +84,10 @@ def environment(c,log,backend='disabled'):
     if preload:e['LD_PRELOAD']=':'.join(preload)
     return e
 
+def gpu_devices(dev=Path('/dev')):
+    # AMD/Intel use /dev/dri (and /dev/kfd for ROCm); NVIDIA's driver uses its own nodes.
+    return [p for p in (dev/'dri',dev/'kfd',*sorted(dev.glob('nvidia*'))) if p.exists()]
+
 def sandbox(c,log,e,*,display=None,gpu=True,network=False,devices=(),installer=False,code_files=(),exports=None):
     if network and not c.get('allow_host_network',False):
         raise RuntimeError('Wi-Fi shares host network services and abstract sockets. Read SECURITY.md and explicitly set allow_host_network=true to opt in.')
@@ -111,8 +116,7 @@ def sandbox(c,log,e,*,display=None,gpu=True,network=False,devices=(),installer=F
             if p.exists():
                 cmd+=['--ro-bind',str(p.resolve()),str(p.resolve())]
                 if p.is_symlink():cmd+=['--symlink',str(p.resolve()),str(p)]
-        for dev in ('/dev/dri','/dev/kfd'):
-            if Path(dev).exists():cmd+=['--dev-bind',dev,dev]
+        for dev in gpu_devices():cmd+=['--dev-bind',str(dev),str(dev)]
     cmd+=['--ro-bind',str(c['runner']),str(c['runner']),
           '--bind',str(c['data_dir']),str(c['data_dir'])]
     for part in ('scripts','src/usb-bridge','build'):

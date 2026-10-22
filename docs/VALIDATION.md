@@ -375,3 +375,21 @@ moving aside installs it cannot verify), in a throwaway home on the same machine
   verifies.
 - Unit tests cover moving aside only folders with the ownership marker and no
   baseline, never deleting, and reading the old baseline location.
+
+## NVIDIA hybrid laptop — 22 October 2026 (user report)
+
+A user with an NVIDIA T600 laptop GPU plus Intel Iris Xe (TUXEDO OS, KDE Plasma
+6.6 on Wayland) reported the OpenCL and OpenGL diagnostics failing in the
+sandbox. Two causes:
+
+- NVIDIA's driver uses its own `/dev/nvidia*` device nodes, which the sandbox did
+  not expose; only `/dev/dri` and `/dev/kfd` were passed.
+- On hybrid laptops, rendering stays on the Intel GPU unless PRIME render offload
+  is requested.
+
+After the user applied both changes locally, setup and all three diagnostics
+passed. The project now passes `/dev/nvidia*` nodes through when they exist, and
+setup enables PRIME offload when it detects an NVIDIA GPU alongside an Intel or
+AMD one. On this AMD machine the sandbox still receives exactly `/dev/dri` and
+`/dev/kfd`. Unit tests cover NVIDIA node selection and when PRIME offload is
+configured. Scanning on NVIDIA has not been reported yet.

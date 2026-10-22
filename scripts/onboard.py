@@ -83,6 +83,17 @@ def udev_rule_installed():
     return False
 
 
+def other_gpu_present(drm=Path('/sys/class/drm')):
+    """True when an Intel or AMD GPU is also present, e.g. a hybrid laptop."""
+    for card in drm.glob('card*'):
+        try:
+            if card.name[4:].isdigit() and (card/'device/vendor').read_text().strip() in ('0x8086', '0x1002'):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def write_config(path, gpu_name, installer):
     base = data_home()/'crealityscan-linux'
     runtime = base/'runtime'
@@ -90,6 +101,10 @@ def write_config(path, gpu_name, installer):
     c.update(runner=str(fetch.runner(runtime)), dxvk_dir=str(fetch.dxvk(runtime)),
              installer=str(installer), data_dir=str(base/'data'), exports_dir=str(default_dir()),
              gpu_name=gpu_name)
+    if 'nvidia' in gpu_name.lower() and other_gpu_present():
+        # On hybrid laptops apps render on the Intel/AMD GPU unless PRIME render
+        # offload is requested for the NVIDIA one.
+        c['environment'] = {'__NV_PRIME_RENDER_OFFLOAD': '1', '__GLX_VENDOR_LIBRARY_NAME': 'nvidia'}
     with open(path, 'x') as f:
         json.dump(c, f, indent=2); f.write('\n')
     print('Created', path, flush=True)

@@ -8,7 +8,9 @@
 
    Your GPU also needs a working Vulkan driver and an OpenCL driver. The tested
    combination is an AMD RX 6800 XT with ROCm OpenCL (`rocm-opencl-runtime` on
-   Arch); other GPUs and OpenCL drivers are untested (see LIMITATIONS.md).
+   Arch). NVIDIA needs the proprietary driver with OpenCL; a user's NVIDIA T600
+   laptop passed setup and diagnostics. Other GPUs and OpenCL drivers are
+   untested (see LIMITATIONS.md).
 2. Download **CrealityScan 4.3.2 for Windows** (`CrealityScan_win_4.3.2.exe`)
    from Creality into your Downloads folder.
 3. From this repository, run:
@@ -119,6 +121,9 @@ entries in `environment` using values measured on your machine:
 - `DRI_PRIME`: your Mesa PCI/device selector, if needed.
 - `DXVK_FILTER_DEVICE_NAME`: your intended Vulkan device name substring.
 - `RUSTICL_ENABLE`: `radeonsi` only if deliberately testing Rusticl.
+- `__NV_PRIME_RENDER_OFFLOAD` (`1`) and `__GLX_VENDOR_LIBRARY_NAME` (`nvidia`):
+  render on the NVIDIA GPU of a laptop that also has Intel or AMD graphics.
+  `setup` sets both when it detects that combination.
 - `HSA_ENABLE_SDMA`: defaults to 0 for the tested ROCm workaround; override to 1
   only as an explicit experiment. This affects this app process, not the desktop.
 

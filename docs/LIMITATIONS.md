@@ -6,7 +6,9 @@ DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since
 passed live USB scanning in every mode the user tried, at about 80–90 FPS in
 Laser Lines mode, the same as the earlier install. Prebuilt helpers are built
 on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one GPU and can be overridden with
-`--gpu-name`.
+`--gpu-name`. NVIDIA: one user's T600 laptop GPU (TUXEDO OS, KDE Wayland) passed
+setup and diagnostics with NVIDIA device access and PRIME offload; scanning on
+NVIDIA is not yet reported, and the RX 6800 XT allocation fix does not apply.
 USB support covers only the Pika (USB ID 2bc5:0c0b). With another Creality
 scanner connected, USB launch stops with a message pointing to
 `creality.py survey`, a read-only report owners can share to help add support.

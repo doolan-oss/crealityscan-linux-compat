@@ -6,8 +6,9 @@ in Wine inside a sandbox, opens as normal desktop windows, and saves your scans
 to an ordinary `Documents/CrealityScan` folder. This is an unofficial,
 experimental community project; you supply the CrealityScan installer yourself.
 
-Tested on CachyOS with an AMD RX 6800 XT (ROCm OpenCL) on KDE Plasma. Other
-distributions and GPUs may work but are untested; read
+Tested on CachyOS with an AMD RX 6800 XT (ROCm OpenCL) on KDE Plasma. A user
+also reports setup and the GPU check passing on TUXEDO OS with an NVIDIA T600
+laptop GPU. Other distributions and GPUs may work but are untested; read
 [LIMITATIONS.md](docs/LIMITATIONS.md) before relying on it.
 
 ## Install
@@ -17,7 +18,9 @@ distributions and GPUs may work but are untested; read
    - Ubuntu 24.04: `sudo apt install git bubblewrap python3 psmisc procps`
 
    Your GPU also needs a Vulkan driver and an OpenCL driver. On AMD, the tested
-   OpenCL driver is ROCm (`rocm-opencl-runtime` on Arch/CachyOS).
+   OpenCL driver is ROCm (`rocm-opencl-runtime` on Arch/CachyOS). On NVIDIA, use
+   the proprietary driver with its OpenCL support (`opencl-nvidia` on Arch).
+   On laptops with both Intel and NVIDIA graphics, setup selects the NVIDIA GPU.
 2. Download **CrealityScan 4.3.2 for Windows** (`CrealityScan_win_4.3.2.exe`)
    from Creality into your Downloads folder.
 3. Get this project and run setup:
