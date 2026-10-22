@@ -6,7 +6,9 @@ DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since
 passed live USB scanning in every mode the user tried, at about 80–90 FPS in
 Laser Lines mode, the same as the earlier install. Prebuilt helpers are built
 on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one GPU and can be overridden with
-`--gpu-name`.
+`--gpu-name`. NVIDIA: one user's T600 laptop GPU (TUXEDO OS, KDE Wayland) passed
+setup and diagnostics with NVIDIA device access and PRIME offload; scanning on
+NVIDIA is not yet reported, and the RX 6800 XT allocation fix does not apply.
 Other scanners, firmware, GPU families, OpenCL stacks and app versions are not
 validated by making configuration portable. The allocation change remains
 restricted to AMD gfx1030/RX 6800 XT contexts. Other hardware requires new evidence.

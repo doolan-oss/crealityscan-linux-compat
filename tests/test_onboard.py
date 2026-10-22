@@ -131,6 +131,46 @@ class OnboardTests(unittest.TestCase):
         self.assertFalse((self.root/'config.json').exists())
 
 
+class NvidiaTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+
+    def test_nvidia_device_nodes_passed_to_sandbox(self):
+        dev = self.root/'dev'
+        for name in ('dri', 'nvidia-caps'):
+            (dev/name).mkdir(parents=True)
+        for name in ('nvidia0', 'nvidiactl', 'nvidia-uvm', 'video0', 'kfd-not'):
+            (dev/name).write_text('')
+        self.assertEqual([p.name for p in common.gpu_devices(dev)],
+                         ['dri', 'nvidia-caps', 'nvidia-uvm', 'nvidia0', 'nvidiactl'])
+
+    def drm(self, *vendors):
+        drm = self.root/('drm-' + '-'.join(vendors))
+        for i, vendor in enumerate(vendors):
+            (drm/f'card{i}/device').mkdir(parents=True)
+            (drm/f'card{i}/device/vendor').write_text(vendor + '\n')
+            (drm/f'card{i}-eDP-1').mkdir()
+        return drm
+
+    def test_prime_offload_only_for_hybrid_nvidia(self):
+        self.assertTrue(onboard.other_gpu_present(self.drm('0x10de', '0x8086')))
+        self.assertFalse(onboard.other_gpu_present(self.drm('0x10de')))
+        installer = self.root/'setup.exe'; installer.write_bytes(b'x')
+        for gpu, hybrid, expected in (('NVIDIA T600 Laptop GPU', True, '1'), ('NVIDIA T600 Laptop GPU', False, None),
+                                      ('AMD Radeon RX 6800 XT', True, None)):
+            with self.subTest(gpu=gpu, hybrid=hybrid):
+                config = self.root/f'{gpu}-{hybrid}.json'
+                with patch('onboard.fetch.runner', return_value=self.root/'runner'), \
+                     patch('onboard.fetch.dxvk', return_value=self.root/'dxvk'), \
+                     patch('onboard.other_gpu_present', return_value=hybrid), \
+                     patch.dict(os.environ, {'XDG_DATA_HOME': str(self.root/'share')}):
+                    onboard.write_config(config, gpu, installer)
+                env = json.loads(config.read_text())['environment']
+                self.assertEqual(env.get('__NV_PRIME_RENDER_OFFLOAD'), expected)
+                self.assertTrue(set(env) <= common.ENV_KEYS)
+
+
 class RerunTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
