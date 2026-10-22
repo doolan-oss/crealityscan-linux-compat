@@ -115,12 +115,15 @@ def main():
     sub=ap.add_subparsers(dest='command',required=True)
     p=sub.add_parser('setup',help='download pinned inputs, configure, install, check and add a menu entry')
     p.add_argument('--installer',help='CrealityScan_win_4.3.2.exe (default: found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
+    sub.add_parser('survey',help='describe connected Creality scanners for a hardware report (read-only)')
     p=sub.add_parser('fetch',help='download the pinned Wine runner and DXVK');p.add_argument('--dir',type=Path,default=onboard.data_home()/'crealityscan-linux/runtime')
     p=sub.add_parser('configure');p.add_argument('--runner',required=True);p.add_argument('--installer',required=True);p.add_argument('--dxvk-dir',required=True);p.add_argument('--data-dir',required=True)
     for cmd in ('doctor','install','diagnose','smoke'):sub.add_parser(cmd)
     p=sub.add_parser('build');p.add_argument('--portable',action='store_true',help='link libyuv statically (release builds)')
     p=sub.add_parser('launch');p.add_argument('--mode',choices=('usb','wifi'),default='usb')
     args=ap.parse_args()
+    if args.command=='survey':
+        import survey;print(survey.report());return
     if args.command=='fetch':
         print('runner:',fetch.runner(args.dir));print('dxvk:',fetch.dxvk(args.dir));return
     if args.command=='setup':

@@ -1,6 +1,7 @@
 # CrealityScan on Linux — community Pika support
 
-Run **CrealityScan 4.3.2** with a **Creality Pika** scanner on Linux. The app runs
+Run **CrealityScan 4.3.2** with a **Creality Pika** scanner on Linux (other
+Creality scanners: [see below](#other-creality-scanners)). The app runs
 in Wine inside a sandbox, opens as normal desktop windows, and saves your scans
 to an ordinary `Documents/CrealityScan` folder. This is an unofficial,
 experimental community project; you supply the CrealityScan installer yourself.
@@ -59,6 +60,23 @@ with your distribution and GPU.
 To uninstall, delete `~/.local/share/crealityscan-linux`,
 `~/.local/share/applications/crealityscan-linux.desktop` and the
 `crealityscan-linux-compat` folder. Your scans in `~/Documents/CrealityScan` stay.
+
+## Other Creality scanners
+
+Only the **Creality Pika** works so far: the USB bridge recognises only the Pika,
+and with another scanner connected the app stops with a message saying so.
+CrealityScan itself supports other Creality scanners (such as the Raptor, Otter
+and Ferret families), and they may be possible to add. If you have one:
+
+1. Connect it by USB and run `python3 scripts/creality.py survey` in the
+   project folder. It describes how the scanner connects (USB IDs, camera
+   formats); it changes nothing and contains no serial numbers.
+2. Paste the output into a
+   [hardware report](https://github.com/doolan-oss/crealityscan-linux-compat/issues/new?template=hardware-report.yml)
+   along with the scanner's model name.
+
+Wi-Fi mode doesn't use the USB bridge, so a scanner with Wi-Fi might already
+work in Wi-Fi mode. That is untested; see Wi-Fi in [SETUP.md](docs/SETUP.md).
 
 ## About the Releases page
 

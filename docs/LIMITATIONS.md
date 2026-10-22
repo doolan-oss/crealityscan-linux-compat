@@ -7,6 +7,9 @@ passed live USB scanning in every mode the user tried, at about 80–90 FPS in
 Laser Lines mode, the same as the earlier install. Prebuilt helpers are built
 on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one GPU and can be overridden with
 `--gpu-name`.
+USB support covers only the Pika (USB ID 2bc5:0c0b). With another Creality
+scanner connected, USB launch stops with a message pointing to
+`creality.py survey`, a read-only report owners can share to help add support.
 Other scanners, firmware, GPU families, OpenCL stacks and app versions are not
 validated by making configuration portable. The allocation change remains
 restricted to AMD gfx1030/RX 6800 XT contexts. Other hardware requires new evidence.
