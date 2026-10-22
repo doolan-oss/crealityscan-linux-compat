@@ -1,3 +1,6 @@
 # Local-seat access only for the observed Creality Pika USB identity.
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="0c0b", TAG+="uaccess"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c0b", TAG+="uaccess"
+# Creality Sermoon S1 (experimental support).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="0c06", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c06", TAG+="uaccess"

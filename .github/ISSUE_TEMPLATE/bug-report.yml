@@ -41,5 +41,5 @@ body:
     attributes:
       label: Error or output
       description: |
-        The error shown in the terminal or desktop notification. For problems while the app runs, the newest folder in `~/.local/share/crealityscan-linux/data/logs/` has `wine.log` and `Player.log`; paste only the relevant lines.
+        The error shown in the terminal or desktop notification. For problems while the app runs, the newest folder in `~/.local/share/crealityscan-linux/data/logs/` has `wine.log` and `Player.log`; paste only the relevant lines. For USB problems you can instead run `python3 scripts/creality.py logs` and attach the zip file it saves (serial numbers and Wi-Fi passwords are removed).
       render: text

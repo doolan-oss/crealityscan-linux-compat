@@ -162,6 +162,9 @@ interrupted install is preserved and refused on retry: inspect its logs and use
 a **different new data_dir**. Never restore an old prefix over later projects.
 Building changed code after installation also requires a new data directory for
 validation; no automatic upgrade overwrites an existing user's application.
+`setup` handles this for you when a newer helper release is pinned: it fetches
+it, moves the earlier install aside to `data.previous-…` (nothing is deleted;
+remove it once the new install works) and installs afresh.
 
 ## Validate without a scanner
 
@@ -187,8 +190,10 @@ python3 scripts/creality.py launch --mode usb
 python3 scripts/creality.py launch --mode wifi
 ```
 
-Use one command at a time. USB mode discovers the actual Pika endpoints and
-serial, verifies access/ownership, and starts private helper processes. Its
+Use one command at a time. USB mode discovers the actual scanner endpoints and
+serial, verifies access/ownership, and starts private helper processes. Besides
+the Pika, the Creality Sermoon S1 has experimental support that is off by default
+(`experimental_scanners` in the config); see [USB.md](USB.md). Its
 network namespace is isolated, so it cannot silently fall back to Wi-Fi.
 See [USB.md](USB.md) for permissions and cross-checkout locking.
 Wi-Fi mode shares the host network and exposes no scanner USB nodes. Connect
@@ -212,6 +217,9 @@ projects there.
 
 Logs and app settings remain under data_dir. Some application logs can contain
 scanner network credentials or personal paths; do not publish them unreviewed.
+`python3 scripts/creality.py logs` saves the newest USB session's logs (launcher
+and app) to one zip file in your home folder, with scanner serial numbers, Wi-Fi
+names and passwords, and your home folder path replaced; check it before sharing.
 Close the app normally before unplugging or switching launchers. Reliability
 limits and hardware acceptance still needed are in LIMITATIONS.md.
 

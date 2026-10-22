@@ -109,6 +109,34 @@ class OnboardTests(unittest.TestCase):
              patch.dict(os.environ, {'HOME': str(self.root/'home')}):
             self.assertIsNone(onboard.find_installer())
 
+    def test_udev_rule_checked_per_scanner(self):
+        rules = self.root/'rules.d'; rules.mkdir()
+        (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text().split('# Creality Sermoon')[0])
+        real = Path
+        with patch('onboard.Path', side_effect=lambda p, *a: rules if p == '/etc/udev/rules.d' else real(p, *a)):
+            self.assertTrue(onboard.udev_rule_installed())
+            self.assertFalse(onboard.udev_rule_installed('0c06'))
+            (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text())
+            self.assertTrue(onboard.udev_rule_installed('0c06'))
+
+    def test_experimental_scanner_setting(self):
+        import creality
+        path = self.root/'config.json'
+        c = json.loads((ROOT/'config/config.example.json').read_text())
+        for key in ('runner', 'installer', 'dxvk_dir', 'data_dir'):
+            c[key] = str(self.root/key)
+        path.write_text(json.dumps(c))
+        creality.experimental(path, 'sermoon-s1', False)
+        self.assertEqual(json.loads(path.read_text())['experimental_scanners'], ['sermoon-s1'])
+        self.assertEqual(common.load(path)['experimental_scanners'], ['sermoon-s1'])
+        creality.experimental(path, 'sermoon-s1', True)
+        self.assertEqual(json.loads(path.read_text())['experimental_scanners'], [])
+        with self.assertRaisesRegex(ValueError, 'choose from: sermoon-s1'):
+            creality.experimental(path, 'pika', False)
+        path.write_text(json.dumps(dict(c, experimental_scanners='sermoon-s1')))
+        with self.assertRaisesRegex(ValueError, 'list of scanner names'):
+            common.load(path)
+
     def test_desktop_entry_quotes_paths(self):
         self.assertEqual(onboard.desktop_quote('/plain/path'), '/plain/path')
         self.assertEqual(onboard.desktop_quote('/a b/100%'), '"/a b/100%%"')
@@ -200,6 +228,37 @@ class RerunTests(unittest.TestCase):
         baseline = integrity.installation_path(c); baseline.parent.mkdir(parents=True); baseline.write_text('{}')
         self.assertIsNone(onboard.set_aside_incomplete(c))  # finished install
         self.assertTrue((c['prefix']/'user-file').exists())
+
+    def test_install_from_earlier_helpers_moved_aside_with_its_baseline(self):
+        c = self.config()
+        common.owned(c, create=True).close()
+        c['prefix'].mkdir(); (c['prefix']/'app.exe').write_text('installed')
+        baseline = integrity.installation_path(c)
+        baseline.write_text(json.dumps({'schema': 2, 'files': {}, 'build': {'mf.dll': 'old'}}))
+        build = self.root/'checkout/build'; build.mkdir(parents=True)
+        (build/'manifest.json').write_text(json.dumps({'mf.dll': 'old'}))
+        with patch.object(onboard, 'ROOT', self.root/'checkout'):
+            self.assertIsNone(onboard.set_aside_outdated(c))  # same helpers: kept
+            (build/'manifest.json').write_text(json.dumps({'mf.dll': 'new'}))
+            aside = onboard.set_aside_outdated(c)
+        self.assertFalse(c['data_dir'].exists() or baseline.exists())
+        self.assertEqual((aside/'prefix/app.exe').read_text(), 'installed')
+        moved = integrity.installation_path({'data_dir': aside})
+        self.assertEqual(json.loads(moved.read_text())['build'], {'mf.dll': 'old'})
+        self.assertIsNone(onboard.set_aside_incomplete(c))
+
+    def test_helpers_from_a_superseded_release_are_replaced(self):
+        build = self.root/'checkout/build'; build.mkdir(parents=True)
+        (build/'mf.dll').write_bytes(b'v1')
+        (build/'manifest.json').write_text(json.dumps({'mf.dll': common.hashlib.sha256(b'v1').hexdigest()}))
+        fetched = []
+        with patch.object(onboard, 'ROOT', self.root/'checkout'), patch('onboard.fetch.helpers', side_effect=fetched.append):
+            with patch.dict(onboard.LOCK, {'helpers': {'version': 'v2', 'supersedes': []}}):
+                onboard.helpers({}, None)
+            self.assertEqual(fetched, [])
+            with patch.dict(onboard.LOCK, {'helpers': {'version': 'v2', 'supersedes': [sha(build/'manifest.json')]}}):
+                onboard.helpers({}, None)
+            self.assertEqual(len(fetched), 1)
 
     def test_baseline_found_in_legacy_checkout_store(self):
         c = self.config()

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import models
 
 ORBBEC_VID = '2bc5'
 NAMES = re.compile(r'creality|orbbec|pika|raptor|otter|ferret|sermoon|lizard|cr-scan', re.I)
@@ -36,12 +37,16 @@ def scanners(root=Path('/sys/bus/usb/devices')):
 
 
 def extension_units(raw):
-    """GUIDs of UVC extension units in the configuration descriptors."""
+    """GUIDs and control selectors of UVC extension units in the configuration descriptors."""
     guids, pos = [], 0
     while pos + 2 <= len(raw) and raw[pos] >= 2:
         size = raw[pos]
         if raw[pos+1] == 0x24 and size >= 20 and raw[pos+2] == 0x06:  # CS_INTERFACE, VC_EXTENSION_UNIT
-            guids.append(f'unit {raw[pos+3]}: {raw[pos+4:pos+20].hex()}')
+            line = f'unit {raw[pos+3]}: {raw[pos+4:pos+20].hex()}'
+            mask = models.extension_units(raw[pos:pos+size]).get(raw[pos+3], (None, 0))[1]
+            if mask:
+                line += ' (selectors ' + ','.join(str(i+1) for i in range(mask.bit_length()) if mask >> i & 1) + ')'
+            guids.append(line)
         pos += size
     return guids
 
@@ -52,9 +57,10 @@ def ioctl(fd, request, data):
     return bytes(buf)
 
 
-def formats(node):
-    """Capture formats with frame sizes and rates, without starting a stream."""
-    lines = []
+def enumerate_formats(node):
+    """(kind, fourcc, description, [(width, height, [rates])] or None if stepwise)
+    for each format of a V4L2 node, without starting a stream."""
+    found = []
     fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         caps = struct.unpack_from('<I', ioctl(fd, VIDIOC_QUERYCAP, bytes(104)), 88)[0]
@@ -64,30 +70,40 @@ def formats(node):
                 desc = ioctl(fd, VIDIOC_ENUM_FMT, struct.pack('<II', i, kind) + bytes(56))
             except OSError:
                 break
-            fourcc = desc[44:48].decode('ascii', 'replace')
-            name = desc[12:44].split(b'\0')[0].decode('ascii', 'replace')
+            code = struct.unpack_from('<I', desc, 44)[0]
             sizes = []
             for j in range(32):
                 try:
-                    size = ioctl(fd, VIDIOC_ENUM_FRAMESIZES, struct.pack('<II', j, struct.unpack_from('<I', desc, 44)[0]) + bytes(36))
+                    size = ioctl(fd, VIDIOC_ENUM_FRAMESIZES, struct.pack('<II', j, code) + bytes(36))
                 except OSError:
                     break
                 if struct.unpack_from('<I', size, 8)[0] != 1:  # not discrete
-                    sizes.append('stepwise'); break
+                    sizes = None; break
                 w, h = struct.unpack_from('<II', size, 12)
                 rates = []
                 for k in range(16):
                     try:
-                        ival = ioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, struct.pack('<IIIII', k, struct.unpack_from('<I', desc, 44)[0], w, h, 0) + bytes(32))
+                        ival = ioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, struct.pack('<IIIII', k, code, w, h, 0) + bytes(32))
                     except OSError:
                         break
                     num, den = struct.unpack_from('<II', ival, 20)
                     if struct.unpack_from('<I', ival, 16)[0] == 1 and num:
-                        rates.append(f'{den/num:g}')
-                sizes.append(f'{w}x{h}' + (f'@{"/".join(rates)}' if rates else ''))
-            lines.append(f'{"metadata" if kind == META_CAPTURE else "capture"} {fourcc} ({name}): {", ".join(sizes) or "-"}')
+                        rates.append(den/num)
+                sizes.append((w, h, rates))
+            found.append(('metadata' if kind == META_CAPTURE else 'capture', desc[44:48].decode('ascii', 'replace'),
+                          desc[12:44].split(b'\0')[0].decode('ascii', 'replace'), sizes))
     finally:
         os.close(fd)
+    return found
+
+
+def formats(node):
+    """Capture formats with frame sizes and rates, as report lines."""
+    lines = []
+    for kind, fourcc, name, sizes in enumerate_formats(node):
+        text = 'stepwise' if sizes is None else ', '.join(
+            f'{w}x{h}' + (f'@{"/".join(f"{r:g}" for r in rates)}' if rates else '') for w, h, rates in sizes)
+        lines.append(f'{kind} {fourcc} ({name}): {text or "-"}')
     return lines
 
 
@@ -127,9 +143,9 @@ def report(root=Path('/sys/bus/usb/devices'), v4l=Path('/sys/class/video4linux')
 
 
 def other_scanners(root=Path('/sys/bus/usb/devices')):
-    """Connected Orbbec-made devices that are not the Pika (2bc5:0c0b)."""
+    """Connected Orbbec-made devices that are not a known model (see models.py)."""
     return [f'{read(d/"product") or "unknown scanner"} (USB {read(d/"idVendor")}:{read(d/"idProduct")})'
-            for d in scanners(root) if read(d/'idVendor') == ORBBEC_VID and read(d/'idProduct') != '0c0b']
+            for d in scanners(root) if read(d/'idVendor') == ORBBEC_VID and read(d/'idProduct') not in models.BY_PID]
 
 
 if __name__ == '__main__':

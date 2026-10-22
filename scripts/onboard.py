@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from common import LOCK, ROOT, digest, load, owned
@@ -72,10 +73,11 @@ def desktop_entry(config, folder=None):
     return path
 
 
-def udev_rule_installed():
+def udev_rule_installed(pid='0c0b'):
+    """Whether an installed udev rule mentions this scanner's USB ID (the Pika's by default)."""
     for folder in (Path('/etc/udev/rules.d'), Path('/usr/lib/udev/rules.d'), Path('/lib/udev/rules.d')):
         try:
-            if any('2bc5' in p.read_text(errors='replace') and '0c0b' in p.read_text(errors='replace')
+            if any('2bc5' in p.read_text(errors='replace') and pid in p.read_text(errors='replace')
                    for p in folder.glob('*.rules')):
                 return True
         except OSError:
@@ -152,10 +154,39 @@ def set_aside_incomplete(c):
     return aside
 
 
+def set_aside_outdated(c):
+    """Move aside a finished install made with other helper programs than those
+    now in build/ (an earlier release), with its baseline, so setup installs
+    afresh: launches only accept installed code matching the current helpers."""
+    from integrity import installation_path
+    data, baseline = c['data_dir'], installation_path(c)
+    try:
+        if json.loads(baseline.read_text()).get('build') == json.loads((ROOT/'build/manifest.json').read_text()):
+            return None
+    except (OSError, ValueError):
+        return None
+    lock = owned(c)  # refuses while another session holds this install
+    try:
+        aside = data.with_name(f'{data.name}.previous-{datetime.datetime.now():%Y%m%d-%H%M%S}')
+        os.rename(data, aside)
+        moved = installation_path({'data_dir': aside})
+        moved.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.move(baseline, moved)
+    finally:
+        lock.close()
+    print(f'CrealityScan was installed with earlier helper programs, so setup installs it again.\n'
+          f'The earlier install was moved aside to {aside}.\n'
+          f'Your scans in {c["exports_dir"]} are not affected. Delete it once the new install works.', flush=True)
+    return aside
+
+
 def helpers(c, build):
-    """Use built or prebuilt helpers already in build/, else fetch pinned ones, else build."""
+    """Use built or prebuilt helpers already in build/, else fetch pinned ones, else build.
+    Prebuilt helpers from an earlier pinned release are replaced by the current one."""
     manifest = ROOT/'build/manifest.json'
-    if manifest.exists() and all(digest(ROOT/'build'/n) == h for n, h in json.loads(manifest.read_text()).items()):
+    superseded = (LOCK.get('helpers') or {}).get('supersedes', [])
+    if manifest.exists() and digest(manifest) not in superseded and \
+            all(digest(ROOT/'build'/n) == h for n, h in json.loads(manifest.read_text()).items()):
         return
     if LOCK.get('helpers'):
         fetch.helpers(data_home()/'crealityscan-linux/runtime')
@@ -165,9 +196,11 @@ def helpers(c, build):
 
 
 def finish(config):
+    import models, survey
     entry = desktop_entry(config)
     print('Menu entry:', entry, flush=True)
-    if not udev_rule_installed():
+    connected = {survey.read(d/'idProduct') for d in survey.scanners()} & set(models.BY_PID)
+    if not all(udev_rule_installed(pid) for pid in {'0c0b', *connected}):
         print('\nOne step needs your password: let your user access the scanner, then replug it:\n'
               f'  sudo cp {UDEV_RULE} /etc/udev/rules.d/ && sudo udevadm control --reload', flush=True)
     print('\nDone. Open "CrealityScan" from your app menu with the scanner connected.', flush=True)
