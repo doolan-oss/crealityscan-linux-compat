@@ -1,21 +1,32 @@
 /* SDK mode uses raw, negotiated per-endpoint streams. All Winsock lifetime
  * management shares the process-lifetime control reference. No synthetic data. */
 static const GUID sdk_y8={0x20203859,0,0x0010,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};
-static const unsigned ir_rates[] = {120,110,100,90,80,70,60,50,40,30,20,15,10};
-static const unsigned rgb_rates[] = {60,50,40,30,20,15,10,5};
-static BOOL sdk_profile(unsigned endpoint, REFGUID subtype, UINT64 rate, DWORD *fourcc, DWORD *capacity) {
-  if (endpoint > 1 || (DWORD)rate != 1) return FALSE;
-  unsigned fps = rate >> 32, n = endpoint ? sizeof(rgb_rates)/sizeof(*rgb_rates) : sizeof(ir_rates)/sizeof(*ir_rates);
-  const unsigned *rates = endpoint ? rgb_rates : ir_rates;
-  BOOL valid = FALSE; for (unsigned i=0;i<n;i++) if (rates[i] == fps) valid = TRUE;
-  if (!valid) return FALSE;
-  if (IsEqualGUID(subtype,&MFVideoFormat_MJPG)) { *fourcc=0x47504a4d; *capacity=FRAME_BYTES*3; }
-  else if (endpoint && IsEqualGUID(subtype,&MFVideoFormat_RGB24)) { *fourcc=0x33524742; *capacity=FRAME_BYTES*3; }
-  else if (endpoint && IsEqualGUID(subtype,&MFVideoFormat_NV12)) { *fourcc=0x3231564e; *capacity=FRAME_BYTES*3/2; }
-  else if (endpoint && IsEqualGUID(subtype,&MFVideoFormat_YUY2)) { *fourcc=0x56595559; *capacity=FRAME_BYTES*2; }
-  else if (!endpoint && IsEqualGUID(subtype,&sdk_y8)) { *fourcc=0x59455247; *capacity=FRAME_BYTES; }
-  else return FALSE;
-  return TRUE;
+static BOOL sdk_format(unsigned fourcc, unsigned width, unsigned height, const GUID **subtype, DWORD *capacity, DWORD *stride) {
+  DWORD pixels = width * height;
+  switch (fourcc) {
+  case PROFILE_FOURCC('G','R','E','Y'): *subtype=&sdk_y8; *capacity=pixels; *stride=width; return TRUE;
+  case PROFILE_FOURCC('M','J','P','G'): *subtype=&MFVideoFormat_MJPG; *capacity=pixels*3; *stride=0; return TRUE;
+  case PROFILE_FOURCC('Y','U','Y','V'): *subtype=&MFVideoFormat_YUY2; *capacity=pixels*2; *stride=width*2; return TRUE;
+  /* Decoded from the camera's MJPEG by the native helper. */
+  case PROFILE_FOURCC('N','V','1','2'): *subtype=&MFVideoFormat_NV12; *capacity=pixels*3/2; *stride=width; return TRUE;
+  case PROFILE_FOURCC('B','G','R','3'): *subtype=&MFVideoFormat_RGB24; *capacity=pixels*3; *stride=width*3; return TRUE;
+  }
+  return FALSE;
+}
+/* The requested type must be one this endpoint offered. */
+static BOOL sdk_profile(unsigned endpoint, REFGUID subtype, UINT64 size, UINT64 rate, DWORD *fourcc, DWORD *capacity) {
+  profile_modes modes;
+  if (endpoint > 1 || (DWORD)rate != 1 || !load_modes(endpoint, &modes)) return FALSE;
+  unsigned width = size >> 32, height = (DWORD)size, fps = rate >> 32;
+  for (unsigned i = 0; i < modes.count; i++) {
+    const profile_mode *m = &modes.modes[i];
+    const GUID *offered; DWORD stride;
+    if (m->width != width || m->height != height || !sdk_format(m->fourcc, width, height, &offered, capacity, &stride) ||
+        !IsEqualGUID(offered, subtype)) continue;
+    for (unsigned r = 0; r < m->count; r++)
+      if (m->rates[r] == fps) { *fourcc = m->fourcc; return TRUE; }
+  }
+  return FALSE;
 }
 static void sdk_close(camera *c) {
   /* Caller serializes with io_lock. Stop acknowledgement follows Linux cleanup. */
@@ -42,7 +53,7 @@ static HRESULT sdk_frame(camera *c, BYTE *data, DWORD *length, ULONGLONG *timest
     struct sockaddr_in addr={0};addr.sin_family=AF_INET;addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);addr.sin_port=htons((unsigned short)atoi(port));
     if(!bridge_connect(c->socket,&addr))goto done;
     int nodelay=1;setsockopt(c->socket,IPPROTO_TCP,TCP_NODELAY,(char*)&nodelay,sizeof(nodelay));
-    DWORD req[4]={0x314b4950,c->endpoint,c->fourcc,c->fps},status=0;
+    DWORD req[6]={0x324b4950,c->endpoint,c->fourcc,c->fps,c->width,c->height},status=0;
     if(!control_transfer(c->socket,token,64,TRUE)||!control_transfer(c->socket,req,sizeof(req),TRUE)||
        !control_transfer(c->socket,&status,4,FALSE)||status){LOG("stream setup endpoint=%u error=%lu",c->endpoint,status);goto done;}
   }

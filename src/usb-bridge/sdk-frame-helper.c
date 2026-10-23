@@ -1,7 +1,7 @@
-/* Single explicitly selected Pika GREY endpoint. Never scans /dev or resets
- * USB. Hardware mode requires --allow-hardware and verifies VID/PID via sysfs
- * before opening. Synthetic mode is a transport fixture and makes no device
- * syscalls.
+/* Streams the two explicitly selected camera endpoints of the scanner model
+ * named in PIKA_USB_PID (the Pika by default). Never scans /dev or resets USB;
+ * verifies VID/PID via sysfs before opening. Only the stream modes listed in
+ * PIKA_MODES_0/1 (scanner-profile.h) are accepted.
  */
 #define _GNU_SOURCE
 #include <arpa/inet.h>
@@ -26,7 +26,8 @@
 #include <sys/wait.h>
 #include <netinet/tcp.h>
 #include <sys/file.h>
-#define BYTES (1280 * 960)
+#include "scanner-profile.h"
+#include "scanner-node.h"
 struct metadata_capture { int fd,streaming; void *maps[4]; size_t lengths[4]; unsigned count; uint32_t pending_sequence; unsigned pending_length; unsigned char pending[256]; };
 struct capture {
   struct metadata_capture meta;
@@ -35,7 +36,7 @@ struct capture {
   size_t lengths[4];
   unsigned count;
   uint32_t sequence;
-  unsigned frame_bytes;
+  unsigned frame_bytes, width, height;
   int compressed;
   struct v4l2_format previous_format;
   struct v4l2_streamparm previous_rate;
@@ -66,46 +67,8 @@ static int all(int fd, void *data, size_t n, int sending) {
   }
   return n ? -1 : 0;
 }
-static int pika_node(const char *node) {
-  const char *name = strrchr(node, '/');
-  if (!name || strncmp(node, "/dev/video", 10))
-    return 0;
-  name++;
-  for (const char *p = name + 5; *p; p++)
-    if (*p < '0' || *p > '9')
-      return 0;
-  char path[PATH_MAX], resolved[PATH_MAX], file[PATH_MAX], s[32];
-  snprintf(path, sizeof(path), "/sys/class/video4linux/%s/device", name);
-  if (!realpath(path, resolved))
-    return 0;
-  for (;;) {
-    if (snprintf(file, sizeof(file), "%s/idVendor", resolved) >=
-        (int)sizeof(file))
-      return 0;
-    FILE *f = fopen(file, "r");
-    if (f) {
-      int ok = fgets(s, sizeof(s), f) && strtoul(s, NULL, 16) == 0x2bc5;
-      fclose(f);
-      if (!ok)
-        return 0;
-      if (snprintf(file, sizeof(file), "%s/idProduct", resolved) >=
-          (int)sizeof(file))
-        return 0;
-      f = fopen(file, "r");
-      if (!f)
-        return 0;
-      ok = fgets(s, sizeof(s), f) && strtoul(s, NULL, 16) == 0x0c0b;
-      fclose(f);
-      return ok;
-    }
-    char *slash = strrchr(resolved, '/');
-    if (!slash || slash == resolved)
-      return 0;
-    *slash = 0;
-  }
-}
 static int metadata_open(struct metadata_capture *m,const char *node) {
-  if(!node||!pika_node(node))return -1;
+  if(!node||!scanner_node(node))return -1;
   m->fd=open(node,O_RDWR|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);if(m->fd<0)return -1;
   struct v4l2_format fmt={.type=V4L2_BUF_TYPE_META_CAPTURE};
   if(xioctl(m->fd,VIDIOC_G_FMT,&fmt)||fmt.fmt.meta.dataformat!=V4L2_META_FMT_UVC)return -1;
@@ -180,16 +143,17 @@ static void capture_close(struct capture *c) {
   close(c->fd);
   c->fd = -1;
 }
-static int capture_open(struct capture *c, const char *node, const char *metanode, uint32_t fourcc, unsigned fps) {
+static int capture_open(struct capture *c, const char *node, const char *metanode, uint32_t fourcc, unsigned fps,
+                        unsigned width, unsigned height) {
   memset(c, 0, sizeof(*c));
   c->fd = -1;c->meta.fd=-1;
-  if (!pika_node(node)) {
-    fprintf(stderr, "Refused non-Pika or unverified node\n");
+  if (!scanner_node(node)) {
+    fprintf(stderr, "Refused node not belonging to scanner 2bc5:%04x\n", scanner_pid());
     return -1;
   }
   c->fd = open(node, O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
   if (c->fd < 0) { perror("open video device"); return -1; }
-  fprintf(stderr, "OPEN %s verified Pika 2bc5:0c0b\n", node);
+  fprintf(stderr, "OPEN %s verified scanner 2bc5:%04x\n", node, scanner_pid());
   struct v4l2_capability cap = {0};
   if (xioctl(c->fd, VIDIOC_QUERYCAP, &cap) < 0)
     return -1;
@@ -204,8 +168,8 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
   if (!c->have_format || !c->have_rate) return -1;
   struct v4l2_format fmt = {0};
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  fmt.fmt.pix.width = 1280;
-  fmt.fmt.pix.height = 960;
+  fmt.fmt.pix.width = width;
+  fmt.fmt.pix.height = height;
   fmt.fmt.pix.pixelformat = fourcc;
   fmt.fmt.pix.field = V4L2_FIELD_NONE;
   if (xioctl(c->fd, VIDIOC_S_FMT, &fmt) < 0) return -1;
@@ -213,11 +177,12 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
           fmt.fmt.pix.width, fmt.fmt.pix.height, (char *)&fmt.fmt.pix.pixelformat,
           fmt.fmt.pix.bytesperline, fmt.fmt.pix.sizeimage);
   c->compressed = fourcc == V4L2_PIX_FMT_MJPEG;
-  c->frame_bytes = BYTES * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1);
-  if (fmt.fmt.pix.width != 1280 || fmt.fmt.pix.height != 960 ||
-      fmt.fmt.pix.pixelformat != fourcc || fmt.fmt.pix.sizeimage > BYTES * 3 ||
-      (!c->compressed && fmt.fmt.pix.bytesperline != (unsigned)(1280 * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1)))) {
-    fprintf(stderr, "Unsupported negotiated format\n"); return -1;
+  c->width = width; c->height = height;
+  c->frame_bytes = width * height * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1);
+  if (fmt.fmt.pix.width != width || fmt.fmt.pix.height != height ||
+      fmt.fmt.pix.pixelformat != fourcc || fmt.fmt.pix.sizeimage > width * height * 3 ||
+      (!c->compressed && fmt.fmt.pix.bytesperline != width * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1))) {
+    fprintf(stderr, "Unsupported negotiated format; requested %ux%u %.4s\n", width, height, (char *)&fourcc); return -1;
   }
   struct v4l2_streamparm sp = {0};
   sp.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -225,8 +190,11 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
   sp.parm.capture.timeperframe.denominator = fps;
   if (xioctl(c->fd, VIDIOC_S_PARM, &sp) < 0 ||
       sp.parm.capture.timeperframe.numerator != 1 ||
-      sp.parm.capture.timeperframe.denominator != fps)
+      sp.parm.capture.timeperframe.denominator != fps) {
+    fprintf(stderr, "Frame rate %u refused; camera chose %u/%u\n", fps, sp.parm.capture.timeperframe.numerator,
+            sp.parm.capture.timeperframe.denominator);
     return -1;
+  }
   struct v4l2_requestbuffers req = {0};
   req.count = 4;
   req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -251,7 +219,7 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
   enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (xioctl(c->fd, VIDIOC_STREAMON, &type) < 0)
     return -1;
-  fprintf(stderr, "STREAMON: %s 1280x960 %.4s %ufps raw physical buffers\n", node, (char *)&fourcc, fps);
+  fprintf(stderr, "STREAMON: %s %ux%u %.4s %ufps raw physical buffers\n", node, width, height, (char *)&fourcc, fps);
   c->streaming = 1;
   return 0;
 }
@@ -272,7 +240,7 @@ static int capture_frame(struct capture *c, unsigned char *out, uint32_t *header
     return -1;
   if (b.sequence < 5 || !(b.sequence % 120)) fprintf(stderr, "DQBUF: sequence=%u bytes=%u flags=0x%x timestamp=%ld.%06ld\n",
           b.sequence, b.bytesused, b.flags, (long)b.timestamp.tv_sec, (long)b.timestamp.tv_usec);
-  int ok = b.index < c->count && (c->compressed ? b.bytesused > 0 && b.bytesused <= BYTES * 3 : b.bytesused == c->frame_bytes) &&
+  int ok = b.index < c->count && (c->compressed ? b.bytesused > 0 && b.bytesused <= c->width * c->height * 3 : b.bytesused == c->frame_bytes) &&
            b.bytesused <= c->lengths[b.index] &&
            !(b.flags & V4L2_BUF_FLAG_ERROR);
   if (ok) {
@@ -287,21 +255,35 @@ static int capture_frame(struct capture *c, unsigned char *out, uint32_t *header
   return ok ? 0 : -1;
 }
 
-/* Authenticated private protocol v1. Setup: token[64], magic/endpoint/fourcc/fps
- * uint32 little endian. Reply errno uint32. 'N': header[8] then raw payload.
+/* Authenticated private protocol v2. Setup: token[64], magic 'PIK2', endpoint,
+ * fourcc, fps, width, height as uint32 little endian; the mode must be listed
+ * for that endpoint in PIKA_MODES_n. NV12/BGR3 are decoded from the camera's
+ * MJPEG at the same size and rate. Reply errno uint32. 'N': header[8] then raw payload.
  * Header = errno, length, native sequence, flags, monotonic usec lo/hi, 0, 0.
  * 'S': stop, restore original format/rate, reply errno and close connection.
  * Both camera endpoints can stream concurrently in separate child processes.
  */
+static int load_modes(unsigned endpoint, profile_modes *modes) {
+  char name[16]; snprintf(name, sizeof(name), "PIKA_MODES_%u", endpoint);
+  const char *text = getenv(name);
+  if (!profile_parse_modes(text ? text : profile_default_modes[endpoint], modes)) return 0;
+  fprintf(stderr, "Invalid %s: %s\n", name, text);
+  return -1;
+}
 static void client(int sock, const char **nodes) {
-  char token[64], expected[64] = {0}; uint32_t req[4], status = 0;
+  char token[64], expected[64] = {0}; uint32_t req[6], status = 0;
   const char *secret = getenv("PIKA_CAMERA_TOKEN");
   if (!secret || strlen(secret) >= sizeof(expected)) return;
   strcpy(expected, secret);
   if (all(sock, token, 64, 0) || memcmp(token, expected, 64) || all(sock, req, sizeof(req), 0)) return;
-  if (req[0] != 0x314b4950 || req[1] > 1 ||
-      (req[2] != V4L2_PIX_FMT_MJPEG && req[2] != (req[1] ? V4L2_PIX_FMT_YUYV : V4L2_PIX_FMT_GREY) && !(req[1] && (req[2] == V4L2_PIX_FMT_NV12 || req[2] == V4L2_PIX_FMT_BGR24))) ||
-      !req[3] || req[3] > (req[1] ? 60 : 120)) return;
+  profile_modes modes;
+  if (req[0] != 0x324b4950 || req[1] > 1 || load_modes(req[1], &modes)) return;
+  fprintf(stderr, "STREAM REQUEST endpoint=%u %.4s %ux%u %ufps\n", req[1], (char *)&req[2], req[4], req[5], req[3]);
+  if (!profile_find(&modes, req[2], req[4], req[5], req[3])) {
+    fprintf(stderr, "Refused: mode not offered for this scanner\n"); return;
+  }
+  const unsigned width = req[4], height = req[5];
+  const size_t pixel_count = (size_t)width * height;
   char lockname[32]; snprintf(lockname, sizeof(lockname), "frame-endpoint-%u.lock", req[1]);
   int lockfd = open(lockname, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (lockfd < 0 || flock(lockfd, LOCK_EX | LOCK_NB)) {
@@ -311,11 +293,12 @@ static void client(int sock, const char **nodes) {
   int convert_rgb=req[1]&&req[2]==V4L2_PIX_FMT_BGR24;
   int convert_color=convert_nv12||convert_rgb;
   struct capture c = {.fd = -1};
-  if (capture_open(&c, nodes[req[1]], getenv(req[1]?"PIKA_METADATA_1":"PIKA_METADATA_0"), convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3])) status = errno ? errno : EIO;
+  if (capture_open(&c, nodes[req[1]], getenv(req[1]?"PIKA_METADATA_1":"PIKA_METADATA_0"), convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3],
+                   width, height)) status = errno ? errno : EIO;
   if (!all(sock, &status, 4, 1) && !status) {
-    unsigned char *pixels = malloc(BYTES * 3);
-    unsigned char *converted = convert_color?malloc(BYTES*3):NULL;
-    unsigned char *argb = convert_rgb?malloc(BYTES*4):NULL;
+    unsigned char *pixels = malloc(pixel_count * 3);
+    unsigned char *converted = convert_color?malloc(pixel_count*3):NULL;
+    unsigned char *argb = convert_rgb?malloc(pixel_count*4):NULL;
     if(convert_rgb)fprintf(stderr,"COLOR CONVERSION: real MJPEG decoded to BGR24; original UVC metadata preserved\n");
     if(convert_nv12)fprintf(stderr,"COLOR CONVERSION: real MJPEG decoded to NV12; original UVC metadata preserved\n");
     char op;
@@ -333,11 +316,11 @@ static void client(int sock, const char **nodes) {
       if(!h[0]&&!h[6]){h[0]=ENODATA;fprintf(stderr,"No paired UVC metadata after 8 frames\n");}
       unsigned char *output=pixels;
       if(!h[0]&&convert_color){
-        int width=0,height=0;
-        if(MJPGSize(pixels,h[1],&width,&height)||width!=1280||height!=960||
-           (convert_rgb?(MJPGToARGB(pixels,h[1],argb,1280*4,1280,960,1280,960)||ARGBToRGB24(argb,1280*4,converted,1280*3,1280,960)):MJPGToNV12(pixels,h[1],converted,1280,converted+BYTES,1280,1280,960,1280,960))){
-          h[0]=EILSEQ;fprintf(stderr,"MJPEG color conversion failed\n");
-        }else {h[1]=convert_rgb?BYTES*3:BYTES*3/2;output=converted;}
+        int decoded_width=0,decoded_height=0,w=(int)width,ht=(int)height;
+        if(MJPGSize(pixels,h[1],&decoded_width,&decoded_height)||decoded_width!=w||decoded_height!=ht||
+           (convert_rgb?(MJPGToARGB(pixels,h[1],argb,w*4,w,ht,w,ht)||ARGBToRGB24(argb,w*4,converted,w*3,w,ht)):MJPGToNV12(pixels,h[1],converted,w,converted+pixel_count,w,w,ht,w,ht))){
+          h[0]=EILSEQ;fprintf(stderr,"MJPEG color conversion failed (decoded %dx%d)\n",decoded_width,decoded_height);
+        }else {h[1]=convert_rgb?pixel_count*3:pixel_count*3/2;output=converted;}
       }
       if (all(sock, h, sizeof(h), 1) || h[0] || all(sock, output, h[1], 1) || all(sock,meta,h[6],1)) break;
     }
@@ -345,8 +328,28 @@ static void client(int sock, const char **nodes) {
   }
   capture_close(&c); close(lockfd);
 }
+/* Lets the launcher confirm, before starting the app, that this helper build
+ * understands the selected model's profile. */
+static int check_profile(void) {
+  const char *pid = getenv("PIKA_USB_PID");
+  unsigned value;
+  if (pid && profile_parse_pid(pid, &value)) { fprintf(stderr, "Invalid PIKA_USB_PID: %s\n", pid); return 2; }
+  printf("PROFILE scanner 2bc5:%04x\n", scanner_pid());
+  for (unsigned endpoint = 0; endpoint < 2; endpoint++) {
+    profile_modes modes;
+    if (load_modes(endpoint, &modes)) return 2;
+    for (unsigned i = 0; i < modes.count; i++) {
+      const profile_mode *m = &modes.modes[i];
+      printf("endpoint %u: %.4s %ux%u at", endpoint, (const char *)&m->fourcc, m->width, m->height);
+      for (unsigned r = 0; r < m->count; r++) printf(" %u", m->rates[r]);
+      printf(" fps\n");
+    }
+  }
+  return 0;
+}
 int main(int argc, char **argv) {
-  if (argc != 3 || !pika_node(argv[1]) || !pika_node(argv[2])) return 2;
+  if (argc == 2 && !strcmp(argv[1], "--check-profile")) return check_profile();
+  if (argc != 3 || !scanner_node(argv[1]) || !scanner_node(argv[2])) return 2;
   const char *port = getenv("PIKA_CAMERA_PORT"); char *end;
   long number = port ? strtol(port, &end, 10) : 0;
   if (!number || *end || number < 1024 || number > 65535) return 2;
@@ -358,7 +361,7 @@ int main(int argc, char **argv) {
   struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(number), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
   if (bind(listener, (void *)&a, sizeof(a)) || listen(listener, 2)) return 2;
   pid_t children[8] = {0};
-  puts("READY private Pika raw frame service v1"); fflush(stdout);
+  printf("READY private raw frame service v2 for scanner 2bc5:%04x\n", scanner_pid()); fflush(stdout);
   while (!stopping) {
     for (unsigned i = 0; i < 8; i++) if (children[i]) {
       int status; if (waitpid(children[i], &status, WNOHANG) > 0) { if (status) cleanup_failed = 1; children[i] = 0; }

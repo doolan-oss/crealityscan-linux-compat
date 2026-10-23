@@ -16,7 +16,8 @@ static int camera_set, parent_set, controller_handle, hub_handle;
 static const GUID camera_class={0xca3e7ab9,0xb4c3,0x4ae6,{0x82,0x51,0x57,0x9e,0xf9,0x33,0x89,0x0f}};
 static const GUID image_class={0x6bdd1fc6,0x810f,0x11d0,{0xbe,0xc7,8,0,0x2b,0xe2,9,0x2f}};
 static const GUID usb_interface={0xa5dcbf10,0x6530,0x11d2,{0x90,0x1f,0,0xc0,0x4f,0xb9,0x51,0xed}};
-static WCHAR device_ids[5][512], parent_link[512], hub_name[256], driver_key[256];
+static WCHAR device_ids[5][512], parent_link[512], hub_name[256], driver_key[256], hid_prefix[64];
+static char hardware_id[32], description[128];
 static BYTE usb_descriptor[18];
 static DWORD physical_port, physical_ports, physical_address;
 static BYTE config_descriptor[8192]; static DWORD config_size;
@@ -76,8 +77,8 @@ static CONFIGRET WINAPI bridge_parent(PDEVINST parent,DEVINST id,ULONG flags) {
  if(id==HCD_INST)return CR_NO_SUCH_DEVNODE;
  if(id>=CAMERA_INST&&id<PARENT_INST){if(!parent)return CR_INVALID_POINTER;*parent=PARENT_INST;return CR_SUCCESS;}
  WCHAR native_id[512];
- if(CM_Get_Device_IDW(id,native_id,512,0)==CR_SUCCESS &&
-    !wcsncmp(native_id,L"USB\\VID_2BC5&PID_0C0B&MI_04\\",28)) {
+ if(CM_Get_Device_IDW(id,native_id,512,0)==CR_SUCCESS && *hid_prefix &&
+    !wcsncmp(native_id,hid_prefix,lstrlenW(hid_prefix))) {
   if(!parent)return CR_INVALID_POINTER;
   *parent=PARENT_INST;LOG("mapped real Wine HID USB parent to physical composite device");return CR_SUCCESS;
  }
@@ -88,7 +89,7 @@ static CONFIGRET WINAPI bridge_child(PDEVINST child,DEVINST id,ULONG flags) {
  if(id==PARENT_INST){
   WCHAR serial[128],revision[16],path[512];
   GetEnvironmentVariableW(L"PIKA_USB_SERIAL",serial,128);GetEnvironmentVariableW(L"PIKA_USB_REVISION",revision,16);
-  swprintf(path,512,L"USB\\VID_2BC5&PID_0C0B&MI_04\\%ls&%ls&0&0&0",revision,serial);
+  swprintf(path,512,L"%ls%ls&%ls&0&0&0",hid_prefix,revision,serial);
   CONFIGRET ret=CM_Locate_DevNodeW(child,path,0);LOG("physical HID child query result=%lu",ret);return ret;
  }
  return CM_Get_Child(child,id,flags);
@@ -190,9 +191,9 @@ static BOOL WINAPI bridge_registry_a(HDEVINFO set,SP_DEVINFO_DATA *dev,DWORD pro
   if(needed)*needed=4;if(type)*type=REG_DWORD;if(!buffer||size<4){SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}
   *(DWORD*)buffer=prop==SPDRP_ADDRESS?physical_port:0;return TRUE;
  case SPDRP_DRIVER:WideCharToMultiByte(CP_ACP,0,driver_key,-1,driver,sizeof(driver),NULL,NULL);value=driver;break;
- case SPDRP_DEVICEDESC:case SPDRP_FRIENDLYNAME:value="Creality Pika";break;
+ case SPDRP_DEVICEDESC:case SPDRP_FRIENDLYNAME:value=description;break;
  case SPDRP_MFG:value="Creality";break;
- case SPDRP_HARDWAREID:value="USB\\VID_2BC5&PID_0C0B";break;
+ case SPDRP_HARDWAREID:value=hardware_id;break;
  case SPDRP_COMPATIBLEIDS:value="USB\\COMPOSITE";break;
  default:LOG("unsupported parent registry property A %lu",prop);SetLastError(ERROR_INVALID_DATA);return FALSE;
  }
@@ -225,7 +226,7 @@ static HANDLE WINAPI bridge_open_a(PCSTR name,DWORD access,DWORD share,SECURITY_
 }
 static BOOLEAN WINAPI bridge_hid_string(HANDLE handle,ULONG index,void *buffer,ULONG length){
  HIDD_ATTRIBUTES attrs={.Size=sizeof(attrs)};
- if(HidD_GetAttributes(handle,&attrs)&&attrs.VendorID==0x2bc5&&attrs.ProductID==0x0c0b){
+ if(HidD_GetAttributes(handle,&attrs)&&attrs.VendorID==0x2bc5&&attrs.ProductID==scanner_pid()){
   WCHAR key[64];swprintf(key,64,L"PIKA_USB_STRING_%lu",index);
   DWORD needed=GetEnvironmentVariableW(key,NULL,0);
   if(!needed){SetLastError(ERROR_NOT_SUPPORTED);return FALSE;}
@@ -278,9 +279,13 @@ static void install_device_tree(void) {
  physical_address=atoi(address);
  physical_port=atoi(port);physical_ports=atoi(ports);
  if(!physical_port||physical_port>physical_ports||physical_ports>255)return;
- for(unsigned i=0;i<2;i++)swprintf(device_ids[i],512,L"USB\\VID_2BC5&PID_0C0B&MI_%02u\\%ls&%ls&0&0&0",i*2,revision,serial);
- swprintf(device_ids[2],512,L"USB\\VID_2BC5&PID_0C0B\\%ls",serial);
- swprintf(parent_link,512,L"\\\\?\\usb#vid_2bc5&pid_0c0b#%ls#{a5dcbf10-6530-11d2-901f-00c04fb951ed}",serial);
+ unsigned pid=scanner_pid();
+ if(!profile_env("PIKA_USB_PRODUCT",description,sizeof(description)))strcpy(description,"Creality Pika");
+ snprintf(hardware_id,sizeof(hardware_id),"USB\\VID_2BC5&PID_%04X",pid);
+ swprintf(hid_prefix,64,L"USB\\VID_2BC5&PID_%04X&MI_04\\",pid);
+ for(unsigned i=0;i<2;i++)swprintf(device_ids[i],512,L"USB\\VID_2BC5&PID_%04X&MI_%02u\\%ls&%ls&0&0&0",pid,i*2,revision,serial);
+ swprintf(device_ids[2],512,L"USB\\VID_2BC5&PID_%04X\\%ls",pid,serial);
+ swprintf(parent_link,512,L"\\\\?\\usb#vid_2bc5&pid_%04x#%ls#{a5dcbf10-6530-11d2-901f-00c04fb951ed}",pid,serial);
  swprintf(hub_name,256,L"USB#PIKA_BRIDGE_HUB#%ls#{f18a0e88-c30c-11d0-8815-00a0c906bed8}",location);
  swprintf(device_ids[3],512,L"USB\\ROOT_HUB30\\%ls",location);
  swprintf(device_ids[4],512,L"PCI\\PIKA_BRIDGE_HOST\\%ls",location);
@@ -311,7 +316,7 @@ static void install_device_tree(void) {
    }
   }
  }
- installed=TRUE;LOG("installed %u process-local SDK device-tree API mappings for physical Pika",total);
+ installed=TRUE;LOG("installed %u process-local SDK device-tree API mappings for physical scanner 2bc5:%04x (%s)",total,pid,description);
 }
 
 void WINAPI PikaBridgePrepareSDK(void) { install_device_tree(); }

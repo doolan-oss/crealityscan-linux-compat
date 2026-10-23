@@ -78,17 +78,23 @@ CONTROL_IDENTITY(procctl,IAMVideoProcAmp,procctl)
 static HRESULT WINAPI topo_zero(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=0;return S_OK; }
 static HRESULT WINAPI topo_category(BridgeTopology *p,DWORD i,GUID *g) { return E_INVALIDARG; }
 static HRESULT WINAPI topo_connection(BridgeTopology *p,DWORD i,BridgeConnection *g) { return E_INVALIDARG; }
+/* One topology node per extension unit of this model, in launcher order. */
+static DWORD xu_nodes(void) { profile_units units; return load_units(&units)?units.count:0; }
 static HRESULT WINAPI topo_name(BridgeTopology *p,DWORD i,WCHAR *name,DWORD size,DWORD *needed) {
- const WCHAR text[]=L"Pika UVC extension unit 4";
- if(i)return E_INVALIDARG;
- if(needed)*needed=sizeof(text);
- if(!name || size<sizeof(text))return HRESULT_FROM_WIN32(ERROR_MORE_DATA);
- memcpy(name,text,sizeof(text));return S_OK;
+ profile_units units;WCHAR model[64],text[128];
+ if(!load_units(&units)||i>=units.count)return E_INVALIDARG;
+ DWORD n=GetEnvironmentVariableW(L"PIKA_MODEL_NAME",model,64);
+ if(!n||n>=64)lstrcpyW(model,L"Pika");
+ swprintf(text,128,L"%ls UVC extension unit %u",model,units.units[i].unit);
+ DWORD bytes=(lstrlenW(text)+1)*sizeof(WCHAR);
+ if(needed)*needed=bytes;
+ if(!name || size<bytes)return HRESULT_FROM_WIN32(ERROR_MORE_DATA);
+ memcpy(name,text,bytes);return S_OK;
 }
-static HRESULT WINAPI topo_nodes(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=1;return S_OK; }
-static HRESULT WINAPI topo_type(BridgeTopology *p,DWORD i,GUID *g) { if(!g)return E_POINTER;if(i)return E_INVALIDARG;*g=bridge_node_type;return S_OK; }
+static HRESULT WINAPI topo_nodes(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=xu_nodes();return S_OK; }
+static HRESULT WINAPI topo_type(BridgeTopology *p,DWORD i,GUID *g) { if(!g)return E_POINTER;if(i>=xu_nodes())return E_INVALIDARG;*g=bridge_node_type;return S_OK; }
 static HRESULT WINAPI topo_create(BridgeTopology *p,DWORD i,REFIID iid,void **out) {
- if(i)return E_INVALIDARG;
+ if(i>=xu_nodes())return E_INVALIDARG;
  return topo_qi(p,iid,out);
 }
 static const BridgeTopologyVtbl topo_vtable={topo_qi,topo_add,topo_release,topo_zero,topo_category,topo_zero,topo_connection,topo_name,topo_nodes,topo_type,topo_create};
@@ -96,24 +102,30 @@ static HRESULT WINAPI ks_property(BridgeKs *p,BridgeProperty *prop,ULONG plen,vo
  if(returned)*returned=0;
  if(!prop || plen<sizeof(BridgeNode))return E_INVALIDARG;
  BridgeNode *node=(BridgeNode*)prop;
- if(node->NodeId || !IsEqualGUID(&prop->Set,&bridge_xu_guid) || prop->Id<1 || prop->Id>3)
-  return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
- if(prop->Flags!=(0x10000000u|1) && prop->Flags!=(0x10000000u|2)) {
-  LOG("unsupported KsProperty flags=%lx id=%lu",prop->Flags,prop->Id);return E_NOTIMPL;
- }
  camera *c=CONTAINING_RECORD(p,camera,ks);
- DWORD size=0,n=0;
- HRESULT hr=control_rpc(c,1,prop->Id,NULL,0,&size,4,&n);
+ profile_units units;
+ const profile_unit *unit=load_units(&units)&&node->NodeId<units.count?&units.units[node->NodeId]:NULL;
+ if(!unit || memcmp(&prop->Set,unit->guid,16) || prop->Id<1 || prop->Id>32 || !(unit->mask>>(prop->Id-1)&1)) {
+  LOG("unsupported XU request endpoint=%u node=%lu set=%08lx-%04x-%04x selector=%lu flags=%lx",c->endpoint,node->NodeId,
+      prop->Set.Data1,prop->Set.Data2,prop->Set.Data3,prop->Id,prop->Flags);
+  return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+ }
+ if(prop->Flags!=(0x10000000u|1) && prop->Flags!=(0x10000000u|2)) {
+  LOG("unsupported KsProperty flags=%lx unit=%u id=%lu",prop->Flags,unit->unit,prop->Id);return E_NOTIMPL;
+ }
+ /* The helper reads the unit from bits 8-15; helpers-v1 bridges sent 0 there for unit 4. */
+ DWORD selector=prop->Id|unit->unit<<8,size=0,n=0;
+ HRESULT hr=control_rpc(c,1,selector,NULL,0,&size,4,&n);
  if(FAILED(hr))return hr;
  if(n!=4 || size>1024 || !size)return E_UNEXPECTED;
  if(returned)*returned=size;
  if(!data || len<size)return HRESULT_FROM_WIN32(ERROR_MORE_DATA);
  if(prop->Flags&2) {
-  LOG("XU SET endpoint=%u selector=%lu bytes=%lu",c->endpoint,prop->Id,size);
-  hr=control_rpc(c,3,prop->Id,data,size,NULL,0,NULL);
+  LOG("XU SET endpoint=%u unit=%u selector=%lu bytes=%lu",c->endpoint,unit->unit,prop->Id,size);
+  hr=control_rpc(c,3,selector,data,size,NULL,0,NULL);
   if(returned)*returned=0;
  } else {
-  hr=control_rpc(c,2,prop->Id,NULL,0,data,len,&n);
+  hr=control_rpc(c,2,selector,NULL,0,data,len,&n);
   if(returned)*returned=n;
  }
  return hr;
