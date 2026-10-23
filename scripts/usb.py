@@ -102,6 +102,8 @@ def prepare(c,log=None):
        'PIKA_USB_PORTS':(hub/'maxchild').read_text().strip(),'PIKA_USB_DESCRIPTOR':raw[:18].hex(),
        'PIKA_USB_CONFIG':raw[18:].hex(),'PIKA_USB_ADDRESS':(parent/'devnum').read_text().strip()}
     e.update(models.environment(model,raw))
+    units,problems=models.unit_report(model,models.camera_units(raw))
+    for problem in problems:print(f'Warning: {model.name} {problem}; continuing (experimental).',flush=True)
     # Camera names as Windows shows them: the USB interface names.
     for i,number in enumerate((0,2)):
         name=read(parent/f'{parent.name}:1.{number}'/'interface')
@@ -123,6 +125,6 @@ def prepare(c,log=None):
         status=' (experimental)' if model.experimental else ''
         shown={k:v for k,v in e.items() if k.startswith(('PIKA_MODES','PIKA_XU','PIKA_USB_PID','PIKA_USB_PRODUCT','PIKA_MODEL','PIKA_CAMERA_NAME'))}
         text=[f'Scanner: {model.name}{status}, USB 2bc5:{model.pid}',*(f'{k}={v}' for k,v in sorted(shown.items())),
-              *missing_modes(model,nodes),profile,survey.report()]
+              'Extension units:',*units,*(f'Warning: {p}' for p in problems),*missing_modes(model,nodes),profile,survey.report()]
         stateio.write_new(Path(log)/'scanner.txt','\n'.join(t for t in text if t)+'\n')
     return e,required+hid,lock

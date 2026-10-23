@@ -19,6 +19,9 @@ import socketserver
 import struct
 import sys
 import threading
+# The launcher's scanner models (scripts/ is mounted beside src/ in the sandbox).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'scripts'))
+from models import camera_units, selectors
 
 class Xu(C.Structure):
     _fields_ = [('unit', C.c_ubyte), ('selector', C.c_ubyte), ('query', C.c_ubyte),
@@ -38,14 +41,6 @@ expected_pid = os.environ.get('PIKA_USB_PID', '0c0b').lower()
 units = {int(u): (bytes.fromhex(g), int(m, 16)) for u, g, m in
          (item.split(':') for item in os.environ.get('PIKA_XU', '4:a15157a5c5f35e4a8d5a6854b8fa2716:7').split(';'))}
 
-def extension_units(raw):
-    """(unit, GUID) pairs of the UVC extension unit descriptors."""
-    found, pos = set(), 0
-    while pos + 2 <= len(raw) and raw[pos] >= 2:
-        if raw[pos+1] == 0x24 and raw[pos] >= 20 and raw[pos+2] == 0x06: found.add((raw[pos+3], raw[pos+4:pos+20]))
-        pos += raw[pos]
-    return found
-
 locks = [threading.RLock(), threading.RLock()]
 state = []
 for index, node in enumerate(nodes):
@@ -58,10 +53,17 @@ for index, node in enumerate(nodes):
     assert (parent/'serial').read_text().strip() == expected_serial
     assert int((interface/'bInterfaceNumber').read_text().strip(),16) == index*2
     # Verify the measured XU descriptors, rather than relying only on the product ID.
-    present = extension_units((parent/'descriptors').read_bytes())
+    cameras = camera_units((parent/'descriptors').read_bytes())
+    present = {(u, bytes.fromhex(g)) for _, found in cameras for u, g, m in found}
     assert all((unit, guid) in present for unit, (guid, mask) in units.items())
+    # Controls this camera's own descriptors list; uvcvideo refuses others (ENOENT).
+    mine = next((found for number, found in cameras if number == index*2), [])
+    declared = {}
+    for u, g, m in mine: declared.setdefault(u, m)
+    print(f'UNITS endpoint={index} interface={index*2}: ' +
+          ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in mine) or 'none'), flush=True)
     fd = os.open(node, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
-    state.append({'fd':fd,'saved':{}})
+    state.append({'fd':fd,'saved':{},'declared':declared})
 
 def xu(fd, unit, selector, query, length, payload=b''):
     if unit not in units or not 1 <= selector <= 32 or not units[unit][1] >> (selector-1) & 1 or not 1 <= length <= 1024:
@@ -122,9 +124,10 @@ class Handler(socketserver.BaseRequestHandler):
                         ctrl_set(fd,selector,struct.unpack('<i',payload)[0])
                     else: raise OSError(errno.ENOTSUP,'operation')
             except OSError as e: error=e.errno
-            print(json.dumps({'op':op,'endpoint':ep,'unit':unit,'selector':selector,'request_length':n,
+            declared=bool(state[ep]['declared'].get(unit,0)>>(selector-1)&1) if unit and selector else None
+            print(json.dumps({'op':op,'endpoint':ep,'unit':unit,'selector':selector,'declared':declared,'request_length':n,
                               'request_header':payload[:24].hex() if op==3 else None,
-                              'response_length':len(out),'errno':error}),flush=True)
+                              'response_length':len(out),'errno':error,'error':errno.errorcode.get(error)}),flush=True)
             self.request.sendall(struct.pack('<2I',error,len(out))+out)
         except (OSError,EOFError): return
 class Server(socketserver.ThreadingTCPServer):

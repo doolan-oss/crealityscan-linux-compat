@@ -30,8 +30,13 @@ python3 scripts/creality.py experimental sermoon-s1
 ```
 
 then start CrealityScan as usual. Each USB launch writes `scanner.txt` (model,
-profile and camera formats, no serial) beside `wine.log`, `frames.log` (stream
-requests) and `controls.log` (extension-unit traffic). `python3 scripts/creality.py logs`
+profile, each camera's extension units and the controls they list, camera
+formats; no serial) beside `wine.log`, `frames.log` (stream requests) and
+`controls.log` (extension-unit traffic, with the errno name of any request the
+camera refuses). For an experimental model, launch warns about extension units
+that differ from the profile but continues, so that first test runs still
+produce these logs. The survey also prints the raw USB device and configuration
+descriptors, which contain no strings or serial number. `python3 scripts/creality.py logs`
 bundles those and the app's own logs, including the SDK's `ScannerStreamSDK.log`
 (which stream modes the SDK wants), into one zip file to attach to a report.
 `python3 scripts/creality.py experimental sermoon-s1 --off` turns it off again. The

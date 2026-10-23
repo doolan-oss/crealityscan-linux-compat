@@ -40,19 +40,21 @@ def xu(unit, guid, controls):
     return bytes([26, 0x24, 0x06, unit]) + guid + bytes([bin(controls).count('1'), 1, 1, 1, controls, 0])
 
 
-def descriptors(pid, units):
+def descriptors(pid, units, rgb_units=None):
+    """Device and configuration descriptors; units are each camera's extension
+    units (unit, GUID, control bitmap), or the IR camera's when rgb_units is given."""
     device = bytes([18, 1, 0x20, 0x03, 0xef, 2, 1, 9, 0xc5, 0x2b, pid & 0xff, pid >> 8, 0x19, 0x04, 1, 2, 3, 1])
     body = b''
     for number, cls, sub, name in ((0, 0x0e, 1, 4), (1, 0x0e, 2, 5), (2, 0x0e, 1, 6), (3, 0x0e, 2, 5), (4, 3, 0, 7)):
         body += bytes([9, 4, number, 0, 0, cls, sub, 0, name])
         if sub == 1 and cls == 0x0e:
-            body += b''.join(xu(*u) for u in units)
+            body += b''.join(xu(*u) for u in (rgb_units if number and rgb_units is not None else units))
     config = bytes([9, 2, (9 + len(body)) & 0xff, (9 + len(body)) >> 8, 5, 1, 0, 0x80, 250])
     return device + config + body
 
 
 def scanner(root, pid=0x0c06, product='Creality Sermoon S1', names=('Creality Sermoon S1 Depth Camera', 'Creality Sermoon S1 RGB Camera'),
-            units=((6, S1_UNIT6_GUID, 0x1f), (4, PIKA_GUID, 0x07)), serial='S1SERIAL42', first_node=2):
+            units=((6, S1_UNIT6_GUID, 0x1f), (4, PIKA_GUID, 0x07)), serial='S1SERIAL42', first_node=2, rgb_units=None):
     """Creates devices/, class/video4linux and class/hidraw under root; returns
     {'usb': device dir, 'nodes': {key: /dev path}}."""
     hub = root/'devices/usb4'
@@ -63,7 +65,7 @@ def scanner(root, pid=0x0c06, product='Creality Sermoon S1', names=('Creality Se
                        ('product', product), ('configuration', 'Default'), ('bcdDevice', '0419'), ('devnum', '7'),
                        ('speed', '5000')):
         (dev/key).write_text(value + '\n')
-    (dev/'descriptors').write_bytes(descriptors(pid, units))
+    (dev/'descriptors').write_bytes(descriptors(pid, units, rgb_units))
     strings = {0: names[0], 1: 'Video Streaming', 2: names[1], 3: 'Video Streaming', 4: 'HID Interface'}
     for number, label in strings.items():
         intf = dev/f'4-2:1.{number}'

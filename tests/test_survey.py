@@ -25,7 +25,8 @@ class SurveyTests(unittest.TestCase):
         for key, value in (('idVendor', vid), ('idProduct', pid), ('manufacturer', maker), ('product', product),
                            ('serial', 'SECRET123'), ('bcdDevice', '0419'), ('speed', '5000')):
             (d/key).write_text(value + '\n')
-        unit = bytes([26, 0x24, 0x06, 4]) + GUID + bytes([1, 1, 1, 1, 1, 0]) if xu else b''
+        # A VideoControl interface descriptor, then its extension unit.
+        unit = bytes([9, 4, 0, 0, 0, 0x0e, 1, 0, 0, 26, 0x24, 0x06, 4]) + GUID + bytes([1, 1, 1, 1, 1, 0]) if xu else b''
         (d/'descriptors').write_bytes(bytes([18, 1]) + bytes(16) + bytes([9, 2]) + bytes(7) + unit)
         intf = d/f'{name}:1.0'; intf.mkdir()
         for key, value in (('bInterfaceNumber', '00'), ('bInterfaceClass', '0e'),
@@ -40,7 +41,9 @@ class SurveyTests(unittest.TestCase):
         self.assertIn('USB 2bc5:0abc  Creality Lizard', text)
         self.assertIn('USB 2bc5:0c06  Creality Creality Sermoon S1', text)
         self.assertIn('interface 00: video (UVC) (class 0e/01/00), uvcvideo', text)
-        self.assertIn('UVC extension unit 4: ' + GUID.hex() + ' (selectors 1)', text)
+        self.assertIn('UVC extension units, camera 0 (interface 0): unit 4 ' + GUID.hex() + ' (selectors 1)', text)
+        self.assertIn('  USB descriptors (hex):\n    1201', text)
+        self.assertNotIn(b'SECRET123'.hex(), text)
         self.assertNotIn('SECRET123', text)
         self.assertNotIn('Webcam', text)
 

@@ -53,33 +53,68 @@ def encode_modes(modes):
     return ';'.join(f'{fourcc}:{w}x{h}:{",".join(map(str, rates))}' for fourcc, w, h, rates in modes)
 
 
-def extension_units(raw):
-    """{unit: (GUID hex, selector bitmask)} from UVC extension unit descriptors.
-    Bit n of the mask is set when the unit reports control (selector) n+1."""
-    units, pos = {}, 0
+def camera_units(raw):
+    """Extension units of each camera, from the raw USB descriptors: a list, in
+    descriptor order, of (VideoControl interface number, [(unit, GUID hex,
+    selector mask), ...]). Bit n of the mask is set when the unit lists control
+    (selector) n+1; uvcvideo only lets those controls through."""
+    cameras, current, pos = [], None, 0
     while pos + 2 <= len(raw) and raw[pos] >= 2:
-        size = raw[pos]
-        if raw[pos+1] == 0x24 and size >= 24 and raw[pos+2] == 0x06:  # CS_INTERFACE, VC_EXTENSION_UNIT
+        size, kind = raw[pos], raw[pos+1]
+        if kind == 4 and size >= 9:  # interface: VideoControl is class 0e, subclass 01
+            current = (raw[pos+2], []) if raw[pos+5] == 0x0e and raw[pos+6] == 1 else None
+            if current:
+                cameras.append(current)
+        elif kind == 0x24 and size >= 24 and raw[pos+2] == 0x06 and current:  # VC_EXTENSION_UNIT
             pins = raw[pos+21]
+            mask = 0
             if pos + 23 + pins <= len(raw):
                 control_size = raw[pos+22+pins]
-                bitmap = raw[pos+23+pins:pos+23+pins+control_size]
-                units[raw[pos+3]] = (raw[pos+4:pos+20].hex(), int.from_bytes(bitmap, 'little'))
+                mask = int.from_bytes(raw[pos+23+pins:pos+23+pins+control_size], 'little')
+            current[1].append((raw[pos+3], raw[pos+4:pos+20].hex(), mask))
         pos += size
-    return units
+    return cameras
+
+
+def selectors(mask):
+    return ','.join(str(i+1) for i in range(mask.bit_length()) if mask >> i & 1) or 'no controls'
+
+
+def unit_report(model, cameras):
+    """One line per camera listing its extension units, then a line per
+    difference from what the model expects (missing unit, other GUID, no controls)."""
+    lines, problems = [], [] if cameras else ['no camera control interfaces found']
+    for index, (interface, units) in enumerate(cameras):
+        lines.append(f'camera {index} (interface {interface}): ' +
+                     ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in units) or 'no extension units'))
+        for unit, guid in model.units:
+            found = [m for u, g, m in units if u == unit and g == guid]
+            if not found:
+                problems.append(f'camera {index}: extension unit {unit} differs from the known hardware')
+            elif not found[0]:
+                problems.append(f'camera {index}: extension unit {unit} reports no controls')
+    return lines, problems
 
 
 def environment(model, descriptors):
     """Bridge and helper settings for this model; descriptors are the device's
-    raw USB descriptors, which give each extension unit's selectors."""
-    found = extension_units(descriptors)
+    raw USB descriptors, which give each camera's extension units and selectors.
+    Supported models must match exactly. For experimental ones, differences are
+    left to unit_report() to record, so a first test run still yields logs."""
+    cameras = camera_units(descriptors)
+    problems = unit_report(model, cameras)[1]
+    if problems and not model.experimental:
+        raise RuntimeError(f'{model.name}: {problems[0]}')
     xu = []
     for unit, guid in model.units:
-        if found.get(unit, (None,))[0] != guid:
-            raise RuntimeError(f'{model.name}: extension unit {unit} differs from the known hardware')
-        if not found[unit][1]:
-            raise RuntimeError(f'{model.name}: extension unit {unit} reports no controls')
-        xu.append(f'{unit}:{guid}:{found[unit][1]:x}')
+        masks = [m for _, units in cameras for u, g, m in units if (u, g) == (unit, guid)]
+        if masks:
+            # The bridge takes one mask per unit: allow what any camera lists. If none
+            # lists a control, pass every selector on so the kernel's answer is logged.
+            mask = 0
+            for m in masks:
+                mask |= m
+            xu.append(f'{unit}:{guid}:{mask or 0xffffffff:x}')
     return {'PIKA_USB_PID': model.pid, 'PIKA_USB_PRODUCT': model.name, 'PIKA_MODEL_NAME': model.short,
             'PIKA_MODES_0': encode_modes(model.modes[0]), 'PIKA_MODES_1': encode_modes(model.modes[1]),
             'PIKA_XU': ';'.join(xu)}

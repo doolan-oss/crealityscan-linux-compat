@@ -37,18 +37,11 @@ def scanners(root=Path('/sys/bus/usb/devices')):
 
 
 def extension_units(raw):
-    """GUIDs and control selectors of UVC extension units in the configuration descriptors."""
-    guids, pos = [], 0
-    while pos + 2 <= len(raw) and raw[pos] >= 2:
-        size = raw[pos]
-        if raw[pos+1] == 0x24 and size >= 20 and raw[pos+2] == 0x06:  # CS_INTERFACE, VC_EXTENSION_UNIT
-            line = f'unit {raw[pos+3]}: {raw[pos+4:pos+20].hex()}'
-            mask = models.extension_units(raw[pos:pos+size]).get(raw[pos+3], (None, 0))[1]
-            if mask:
-                line += ' (selectors ' + ','.join(str(i+1) for i in range(mask.bit_length()) if mask >> i & 1) + ')'
-            guids.append(line)
-        pos += size
-    return guids
+    """One line per camera (VideoControl interface): its UVC extension units,
+    GUIDs and the control selectors each lists."""
+    return [f'camera {i} (interface {n}): ' + ('; '.join(f'unit {u} {g} (selectors {models.selectors(m)})' for u, g, m in units)
+                                                 or 'none')
+            for i, (n, units) in enumerate(models.camera_units(raw))]
 
 
 def ioctl(fd, request, data):
@@ -122,10 +115,14 @@ def report(root=Path('/sys/bus/usb/devices'), v4l=Path('/sys/class/video4linux')
             out.append(f'  interface {read(intf/"bInterfaceNumber")}: {CLASSES.get(cls, cls)} '
                        f'(class {cls}/{read(intf/"bInterfaceSubClass")}/{read(intf/"bInterfaceProtocol")}), {driver}')
         try:
-            units = extension_units((dev/'descriptors').read_bytes())
+            raw = (dev/'descriptors').read_bytes()
         except OSError:
-            units = []
-        out += [f'  UVC extension {u}' for u in units]
+            raw = b''
+        out += [f'  UVC extension units, {line}' for line in extension_units(raw)]
+        if raw:
+            # Device and configuration descriptors only: no strings, so no serial number.
+            out.append('  USB descriptors (hex):')
+            out += [f'    {raw[i:i+64].hex()}' for i in range(0, len(raw), 64)]
         for entry in sorted(v4l.glob('video*'), key=lambda p: int(p.name[5:] or 0)):
             if real not in entry.resolve().parents:
                 continue

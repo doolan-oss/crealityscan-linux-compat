@@ -1,5 +1,6 @@
 """Scanner model profiles and the USB launch path for each model, using fake
 sysfs trees and the Sermoon S1's V4L2 formats from issue #7."""
+import io
 from pathlib import Path
 import shutil
 import subprocess
@@ -79,14 +80,40 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(S1.experimental)
         self.assertEqual(S1.pid, '0c06')
 
-    def test_extension_unit_selectors_come_from_the_descriptors(self):
-        raw = fakesysfs.descriptors(0x0c06, ((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0x07)))
-        self.assertEqual(models.extension_units(raw), {6: (fakesysfs.S1_UNIT6_GUID.hex(), 0x1f), 4: (fakesysfs.PIKA_GUID.hex(), 7)})
-        # Unit 4 first: the SDK only addresses unit 4, as on the Pika.
-        self.assertEqual(models.environment(S1, raw)['PIKA_XU'],
-                         f'4:{fakesysfs.PIKA_GUID.hex()}:7;6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f')
-        with self.assertRaisesRegex(RuntimeError, 'unit 6 differs'):
-            models.environment(S1, fakesysfs.descriptors(0x0c06, ((4, fakesysfs.PIKA_GUID, 7),)))
+    def test_extension_units_are_read_per_camera(self):
+        u6, u4 = fakesysfs.S1_UNIT6_GUID.hex(), fakesysfs.PIKA_GUID.hex()
+        raw = fakesysfs.descriptors(0x0c06, ((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0x07)),
+                                    ((6, fakesysfs.S1_UNIT6_GUID, 0x03), (4, fakesysfs.PIKA_GUID, 0)))
+        self.assertEqual(models.camera_units(raw), [(0, [(6, u6, 0x1f), (4, u4, 7)]), (2, [(6, u6, 3), (4, u4, 0)])])
+        lines, problems = models.unit_report(S1, models.camera_units(raw))
+        self.assertEqual(lines, [f'camera 0 (interface 0): unit 6 {u6} selectors 1,2,3,4,5; unit 4 {u4} selectors 1,2,3',
+                                 f'camera 1 (interface 2): unit 6 {u6} selectors 1,2; unit 4 {u4} selectors no controls'])
+        self.assertEqual(problems, ['camera 1: extension unit 4 reports no controls'])
+
+    def test_s1_with_controls_missing_on_one_or_both_cameras_still_gets_a_profile(self):
+        u6, u4 = (6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0)
+        rgb_only = fakesysfs.descriptors(0x0c06, ((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 7)), (u6, u4))
+        both = fakesysfs.descriptors(0x0c06, (u6, u4))
+        # Unit 4 first: the SDK only addresses unit 4, as on the Pika. The bridge gets one
+        # mask per unit: what any camera lists, or every selector if none lists one.
+        for raw, mask, problems in ((rgb_only, '7', ['camera 1: extension unit 4 reports no controls']),
+                                    (both, 'ffffffff', ['camera 0: extension unit 4 reports no controls',
+                                                        'camera 1: extension unit 4 reports no controls'])):
+            with self.subTest(mask=mask):
+                self.assertEqual(models.environment(S1, raw)['PIKA_XU'],
+                                 f'4:{fakesysfs.PIKA_GUID.hex()}:{mask};6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f')
+                self.assertEqual(models.unit_report(S1, models.camera_units(raw))[1], problems)
+        missing6 = fakesysfs.descriptors(0x0c06, ((4, fakesysfs.PIKA_GUID, 7),))
+        self.assertEqual(models.environment(S1, missing6)['PIKA_XU'], f'4:{fakesysfs.PIKA_GUID.hex()}:7')
+        self.assertIn('camera 0: extension unit 6 differs from the known hardware',
+                      models.unit_report(S1, models.camera_units(missing6))[1])
+
+    def test_pika_still_refuses_extension_units_that_differ(self):
+        good = ((4, fakesysfs.PIKA_GUID, 7),)
+        for rgb, message in ((((4, fakesysfs.PIKA_GUID, 0),), 'camera 1: extension unit 4 reports no controls'),
+                             (((5, fakesysfs.PIKA_GUID, 7),), 'camera 1: extension unit 4 differs')):
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, 'Creality Pika: ' + message):
+                models.environment(PIKA, fakesysfs.descriptors(0x0c0b, good, rgb))
 
     @unittest.skipUnless(shutil.which('gcc'), 'needs gcc')
     def test_c_parser_reads_every_profile_and_rejects_malformed_ones(self):
@@ -190,6 +217,18 @@ class LaunchTests(unittest.TestCase):
             message = str(raised.exception)
             self.assertTrue(message.startswith(start), message)
             self.assertTrue(message.endswith(onboard.access_command()), message)
+
+    def test_s1_without_unit_4_controls_launches_with_warnings(self):
+        device = fakesysfs.scanner(self.root, units=((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0)))
+        self.config['experimental_scanners'] = ['sermoon-s1']
+        with patch('sys.stdout', io.StringIO()) as out:
+            e, nodes = self.prepare(device)
+        self.assertIn(f'4:{fakesysfs.PIKA_GUID.hex()}:ffffffff', e['PIKA_XU'])
+        self.assertIn('Warning: Creality Sermoon S1 camera 1: extension unit 4 reports no controls; continuing', out.getvalue())
+        report = (self.log/'scanner.txt').read_text()
+        self.assertIn('Extension units:\ncamera 0 (interface 0): unit 6 ', report)
+        self.assertIn(f'unit 4 {fakesysfs.PIKA_GUID.hex()} selectors no controls', report)
+        self.assertIn('Warning: camera 0: extension unit 4 reports no controls\nWarning: camera 1:', report)
 
     def test_old_helpers_are_reported_for_the_s1(self):
         device = fakesysfs.scanner(self.root)
