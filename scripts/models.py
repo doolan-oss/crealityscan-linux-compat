@@ -16,7 +16,7 @@ class Model:
     name: str           # product name, also the Windows device description
     short: str          # in the SDK-visible extension unit names
     pid: str            # USB product ID; the vendor is always 2bc5
-    units: tuple        # (unit, GUID) of each UVC extension unit, in the order the SDK sees them
+    units: tuple        # (unit, GUID) of each UVC extension unit the bridge exposes
     modes: tuple        # per camera endpoint (IR, RGB): (fourcc, width, height, rates)
     experimental: bool = False
     note: str = ''
@@ -105,8 +105,14 @@ def environment(model, descriptors):
     problems = unit_report(model, cameras)[1]
     if problems and not model.experimental:
         raise RuntimeError(f'{model.name}: {problems[0]}')
+    # The SDK picks an extension unit by its topology node index, which on Windows
+    # follows the device's descriptor order (the S1 lists unit 6 before unit 4).
+    listed = [u for u, g, m in (cameras[0][1] if cameras else [])]
+    known = dict(model.units)
+    order = [u for u in dict.fromkeys(listed) if u in known] + [u for u in known if u not in listed]
     xu = []
-    for unit, guid in model.units:
+    for unit in order:
+        guid = known[unit]
         masks = [m for _, units in cameras for u, g, m in units if (u, g) == (unit, guid)]
         if masks:
             # The bridge takes one mask per unit: allow what any camera lists. If none

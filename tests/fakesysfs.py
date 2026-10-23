@@ -19,6 +19,25 @@ S1_SURVEY = """
 """
 
 
+# Device and configuration descriptors of the Sermoon S1, verbatim from its
+# survey in issue #7 (no strings, so no serial number). Each camera lists unit 6
+# before unit 4; only the IR camera's unit 4 lists controls (1-3).
+S1_DESCRIPTORS = bytes.fromhex('''
+    12011003ef020109c52b060c1904010203010902ec02050104c000080b00020e03000509040000000e0100050d240100016900006cdc02010112240201010200
+    00000000000000030a00000b240503010040020002001b240606d09ee4237811314fae52d2fb8a8d3b480e0103020000001b240604a15157a5c5f35e4a8d5a68
+    54b8fa27160601060207000009240307010100040009040100010e0200060e240101c90081000700000001001b240401035938202000001000800000aa00389b
+    710801000000002e24050100000520030000e20400004c1d00401f00151605000515160500801a060020a107002a2c0a0040420f002e240502000005c0030000
+    dc050000282300802500151605000515160500801a060020a107002a2c0a0040420f003e240503004006b00400c027090080ee3600983a0007b201000907b201
+    0048e80100092e02000a8b0200400d030090d00300151605002a2c0a0040420f0006240d0101040705810200040006300d000000080b02020e03000809040200
+    000e0100080d240100016900006cdc0201031224020101020000000000000000030a20000b240503010040025b16001b240606d09ee4237811314fae52d2fb8a
+    8d3b480e0103020000001b240604a15157a5c5f35e4a8d5a6854b8fa27160601060200000009240307010100040009040300010e0200090f240102db00820007
+    0000000100041b240401025955593200001000800000aa00389b711001000000002624050100800738040040e3090080533b00483f002a2c0a00032a2c0a0040
+    420f0080841e0026240502008007b0040080fc0a0000eb41005046002a2c0a00032a2c0a0040420f0080841e000b240602020001000000002a24070100800738
+    040040e3090080533b00483f001516050004151605002a2c0a0040420f0080841e002a240702008007b0040080fc0a0000eb4100504600151605000415160500
+    2a2c0a0040420f0080841e0006240d0101040705820200040006300d00000009040400010300000b09210101000122210007058303f8000406300000f800
+'''.replace('\n', '').replace(' ', ''))
+
+
 def formats_from_survey(text):
     """{node: survey.enumerate_formats(node)} rebuilt from survey report lines."""
     found, node = {}, None
@@ -54,7 +73,8 @@ def descriptors(pid, units, rgb_units=None):
 
 
 def scanner(root, pid=0x0c06, product='Creality Sermoon S1', names=('Creality Sermoon S1 Depth Camera', 'Creality Sermoon S1 RGB Camera'),
-            units=((6, S1_UNIT6_GUID, 0x1f), (4, PIKA_GUID, 0x07)), serial='S1SERIAL42', first_node=2, rgb_units=None):
+            units=((6, S1_UNIT6_GUID, 0x1f), (4, PIKA_GUID, 0x07)), serial='S1SERIAL42', first_node=2, rgb_units=None,
+            raw=None):
     """Creates devices/, class/video4linux and class/hidraw under root; returns
     {'usb': device dir, 'nodes': {key: /dev path}}."""
     hub = root/'devices/usb4'
@@ -65,7 +85,7 @@ def scanner(root, pid=0x0c06, product='Creality Sermoon S1', names=('Creality Se
                        ('product', product), ('configuration', 'Default'), ('bcdDevice', '0419'), ('devnum', '7'),
                        ('speed', '5000')):
         (dev/key).write_text(value + '\n')
-    (dev/'descriptors').write_bytes(descriptors(pid, units, rgb_units))
+    (dev/'descriptors').write_bytes(raw if raw is not None else descriptors(pid, units, rgb_units))
     strings = {0: names[0], 1: 'Video Streaming', 2: names[1], 3: 'Video Streaming', 4: 'HID Interface'}
     for number, label in strings.items():
         intf = dev/f'4-2:1.{number}'

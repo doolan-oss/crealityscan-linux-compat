@@ -94,19 +94,28 @@ class ProfileTests(unittest.TestCase):
         u6, u4 = (6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0)
         rgb_only = fakesysfs.descriptors(0x0c06, ((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 7)), (u6, u4))
         both = fakesysfs.descriptors(0x0c06, (u6, u4))
-        # Unit 4 first: the SDK only addresses unit 4, as on the Pika. The bridge gets one
-        # mask per unit: what any camera lists, or every selector if none lists one.
+        # Units in the device's order; the bridge gets one mask per unit: what any
+        # camera lists, or every selector if none lists one.
         for raw, mask, problems in ((rgb_only, '7', ['camera 1: extension unit 4 reports no controls']),
                                     (both, 'ffffffff', ['camera 0: extension unit 4 reports no controls',
                                                         'camera 1: extension unit 4 reports no controls'])):
             with self.subTest(mask=mask):
                 self.assertEqual(models.environment(S1, raw)['PIKA_XU'],
-                                 f'4:{fakesysfs.PIKA_GUID.hex()}:{mask};6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f')
+                                 f'6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f;4:{fakesysfs.PIKA_GUID.hex()}:{mask}')
                 self.assertEqual(models.unit_report(S1, models.camera_units(raw))[1], problems)
         missing6 = fakesysfs.descriptors(0x0c06, ((4, fakesysfs.PIKA_GUID, 7),))
         self.assertEqual(models.environment(S1, missing6)['PIKA_XU'], f'4:{fakesysfs.PIKA_GUID.hex()}:7')
         self.assertIn('camera 0: extension unit 6 differs from the known hardware',
                       models.unit_report(S1, models.camera_units(missing6))[1])
+
+    def test_topology_nodes_follow_the_real_device_order(self):
+        # The SDK opens the vendor protocol (unit 4) at topology node 1 on the S1 and node 0
+        # on the Pika; on Windows nodes follow the descriptors, where the S1 lists unit 6 first.
+        u6, u4 = fakesysfs.S1_UNIT6_GUID.hex(), fakesysfs.PIKA_GUID.hex()
+        self.assertEqual(models.camera_units(fakesysfs.S1_DESCRIPTORS), [(0, [(6, u6, 0), (4, u4, 7)]), (2, [(6, u6, 0), (4, u4, 0)])])
+        self.assertEqual(models.environment(S1, fakesysfs.S1_DESCRIPTORS)['PIKA_XU'], f'6:{u6}:ffffffff;4:{u4}:7')
+        pika = models.environment(PIKA, fakesysfs.descriptors(0x0c0b, ((4, fakesysfs.PIKA_GUID, 7),)))
+        self.assertEqual(pika['PIKA_XU'], f'4:{u4}:7')
 
     def test_pika_still_refuses_extension_units_that_differ(self):
         good = ((4, fakesysfs.PIKA_GUID, 7),)
@@ -187,7 +196,7 @@ class LaunchTests(unittest.TestCase):
                                             'GREY:1600x1200:90,80,70,60,50,40,30,15,10')
         self.assertTrue(e['PIKA_MODES_1'].startswith('YUYV:1920x1080:15,10,5;YUYV:1920x1200:15,10,5;MJPG:1920x1080:30,15,10,5;'))
         self.assertIn('BGR3:1920x1200:30,15,10,5', e['PIKA_MODES_1'])
-        self.assertEqual(e['PIKA_XU'], f'4:{fakesysfs.PIKA_GUID.hex()}:7;6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f')
+        self.assertEqual(e['PIKA_XU'], f'6:{fakesysfs.S1_UNIT6_GUID.hex()}:1f;4:{fakesysfs.PIKA_GUID.hex()}:7')
         self.assertEqual(e['PIKA_CAMERA_NAME_0'], 'Creality Sermoon S1 Depth Camera')
         self.assertEqual((e['PIKA_USB_SERIAL'], e['PIKA_USB_REVISION'], e['PIKA_USB_PORT'], e['PIKA_USB_PORTS']), ('S1SERIAL42', '1049', '2', '4'))
         self.assertEqual(e['PIKA_USB_STRING_2'], 'Creality Sermoon S1')
@@ -217,6 +226,18 @@ class LaunchTests(unittest.TestCase):
             message = str(raised.exception)
             self.assertTrue(message.startswith(start), message)
             self.assertTrue(message.endswith(onboard.access_command()), message)
+
+    def test_real_s1_descriptors_launch(self):
+        device = fakesysfs.scanner(self.root, raw=fakesysfs.S1_DESCRIPTORS)
+        self.config['experimental_scanners'] = ['sermoon-s1']
+        with patch('sys.stdout', io.StringIO()):
+            e, nodes = self.prepare(device)
+        self.assertEqual(e['PIKA_XU'], f'6:{fakesysfs.S1_UNIT6_GUID.hex()}:ffffffff;4:{fakesysfs.PIKA_GUID.hex()}:7')
+        self.assertEqual(e['PIKA_USB_DESCRIPTOR'], fakesysfs.S1_DESCRIPTORS[:18].hex())
+        report = (self.log/'scanner.txt').read_text()
+        self.assertIn(f'camera 0 (interface 0): unit 6 {fakesysfs.S1_UNIT6_GUID.hex()} selectors no controls; '
+                      f'unit 4 {fakesysfs.PIKA_GUID.hex()} selectors 1,2,3', report)
+        self.assertIn('Warning: camera 1: extension unit 4 reports no controls', report)
 
     def test_s1_without_unit_4_controls_launches_with_warnings(self):
         device = fakesysfs.scanner(self.root, units=((6, fakesysfs.S1_UNIT6_GUID, 0x1f), (4, fakesysfs.PIKA_GUID, 0)))
