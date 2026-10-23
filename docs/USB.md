@@ -49,8 +49,11 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c0b", TAG+="ua
 ```
 
 `config/70-creality-pika.rules` contains these lines and the same two for the
-Sermoon S1 (`0c06`). If access is missing at launch, the error message gives the
-command to install it.
+Sermoon S1 (`0c06`). Desktop sessions usually get camera access automatically,
+but not HID access, which is why the rule is needed. Setup and each USB launch
+check that you can open the connected scanner's camera and HID nodes. If you
+can't, they name the blocked nodes and give the command that installs the rule;
+if the rule is already installed, they say to unplug and replug the scanner first.
 
 Reload rules and reconnect the scanner for the active seat ACL to apply. This
 project does not automatically write `/etc`, add broad world-writable permissions

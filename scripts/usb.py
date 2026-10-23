@@ -26,6 +26,34 @@ def select(c):
                            f'"python3 scripts/creality.py experimental {model.key}" in the project folder, then start CrealityScan again.')
     return d,model
 
+def device_nodes(d):
+    """The camera/metadata nodes and HID nodes of a discovered scanner."""
+    parent=Path(d['usb_path'])
+    return ([d['nodes'][k]for k in ('0:0','0:1','2:0','2:1')if k in d['nodes']],
+            [str(Path('/dev')/p.name)for p in HIDRAW.glob('*')if parent in (p/'device').resolve().parents])
+
+def blocked(nodes):
+    return [n for n in nodes if not os.access(n,os.R_OK|os.W_OK)]
+
+def connected():
+    try:return discover(PRODUCTS,V4L)
+    except RuntimeError:return []
+
+def access_problems():
+    """(model, nodes this user cannot open) for each connected supported scanner with any."""
+    found=[(models.BY_PID[d['pid']],blocked(sum(device_nodes(d),[])))for d in connected()]
+    return [(m,nodes)for m,nodes in found if nodes]
+
+def access_message(model,nodes):
+    """Short enough for a desktop notification; the important part first."""
+    from onboard import access_command,udev_rule_installed
+    which=', '.join(nodes)
+    if udev_rule_installed(model.pid):
+        return (f'Scanner access blocked: {which}. Unplug and replug the scanner. If that does not help, '
+                f'install the rule again in a terminal: {access_command()}')
+    return (f'Scanner access blocked: {which}. Fix once in a terminal, then unplug and replug the scanner: '
+            f'{access_command()}')
+
 def check_helpers(e,model):
     """Older helper builds know only the Pika; say so instead of failing inside the app."""
     helper=ROOT/'build/sdk-frame-helper'
@@ -63,12 +91,8 @@ def prepare(c,log=None):
     required=[nodes[k]for k in ('0:0','0:1','2:0','2:1')]
     owners=subprocess.run(['fuser',*required],capture_output=True)
     if owners.returncode!=1:raise RuntimeError('Scanner camera endpoints are busy or ownership could not be checked')
-    hid=[str(Path('/dev')/p.name)for p in HIDRAW.glob('*')if parent in (p/'device').resolve().parents]
-    if not all(os.access(n,os.R_OK|os.W_OK)for n in required+hid):
-        from onboard import UDEV_RULE,udev_rule_installed
-        hint='' if udev_rule_installed(model.pid) else (f' Allow access once with: sudo cp {UDEV_RULE} /etc/udev/rules.d/ '
-                                                         '&& sudo udevadm control --reload, then unplug and replug the scanner.')
-        raise RuntimeError('Missing camera/HID permissions; see docs/USB.md.'+hint)
+    hid=device_nodes(d)[1]
+    if blocked(required+hid):raise RuntimeError(access_message(model,blocked(required+hid)))
     raw=(parent/'descriptors').read_bytes();hub=parent.parent
     e={'PIKA_CAMERA_BACKEND':'v4l2','PIKA_SDK_IDENTITY':'1','PIKA_CAMERA_TOKEN':secrets.token_hex(24),
        'PIKA_CONTROL_PORT':'38574','PIKA_CAMERA_PORT':'38573','PIKA_NODE_0':nodes['0:0'],'PIKA_NODE_1':nodes['2:0'],

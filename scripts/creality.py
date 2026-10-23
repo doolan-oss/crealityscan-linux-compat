@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CrealityScan 4.3.2 on Linux: setup and launcher, confined to an owned prefix."""
-import argparse,datetime,json,os,shutil,subprocess,sys
+import argparse,datetime,html,json,os,shutil,subprocess,sys
 from contextlib import nullcontext
 from integrity import installation_path, save_installation, verify_installation
 import stateio
@@ -189,8 +189,10 @@ def main():
 
 def notify(message):
     # Menu launches have no terminal; show failures on the desktop instead.
+    # Notification bodies are markup, so "&&" in a suggested command must be escaped.
     if not sys.stderr.isatty() and shutil.which('notify-send'):
-        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner','CrealityScan could not start',message],check=False)
+        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner','CrealityScan could not start',
+                        html.escape(message,quote=False)],check=False)
 
 if __name__=='__main__':
     try:main()

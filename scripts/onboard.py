@@ -3,6 +3,8 @@ import datetime
 import json
 import os
 from pathlib import Path
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,6 +14,7 @@ import fetch
 import gpuinfo
 
 UDEV_RULE = ROOT/'config/70-creality-pika.rules'
+RULE_FOLDERS = (Path('/etc/udev/rules.d'), Path('/run/udev/rules.d'), Path('/usr/lib/udev/rules.d'), Path('/lib/udev/rules.d'))
 
 
 def data_home():
@@ -73,16 +76,25 @@ def desktop_entry(config, folder=None):
     return path
 
 
-def udev_rule_installed(pid='0c0b'):
-    """Whether an installed udev rule mentions this scanner's USB ID (the Pika's by default)."""
-    for folder in (Path('/etc/udev/rules.d'), Path('/usr/lib/udev/rules.d'), Path('/lib/udev/rules.d')):
+def udev_rule_installed(pid='0c0b', folders=RULE_FOLDERS):
+    """Whether an installed udev rule line matches this scanner's USB ID: vendor 2bc5
+    and this product (the Pika's by default) on the same, uncommented line."""
+    vendor = re.compile(r'ATTRS?\{idVendor\}=="2bc5"', re.I)
+    product = re.compile(r'ATTRS?\{idProduct\}=="%s"' % re.escape(pid), re.I)
+    for folder in folders:
         try:
-            if any('2bc5' in p.read_text(errors='replace') and pid in p.read_text(errors='replace')
-                   for p in folder.glob('*.rules')):
-                return True
+            for rules in folder.glob('*.rules'):
+                for line in rules.read_text(errors='replace').splitlines():
+                    if not line.lstrip().startswith('#') and vendor.search(line) and product.search(line):
+                        return True
         except OSError:
             continue
     return False
+
+
+def access_command():
+    """The one-time command that installs this project's scanner udev rule."""
+    return f'sudo cp {shlex.quote(str(UDEV_RULE))} /etc/udev/rules.d/ && sudo udevadm control --reload'
 
 
 def other_gpu_present(drm=Path('/sys/class/drm')):
@@ -196,11 +208,17 @@ def helpers(c, build):
 
 
 def finish(config):
-    import models, survey
+    import usb
     entry = desktop_entry(config)
     print('Menu entry:', entry, flush=True)
-    connected = {survey.read(d/'idProduct') for d in survey.scanners()} & set(models.BY_PID)
-    if not all(udev_rule_installed(pid) for pid in {'0c0b', *connected}):
-        print('\nOne step needs your password: let your user access the scanner, then replug it:\n'
-              f'  sudo cp {UDEV_RULE} /etc/udev/rules.d/ && sudo udevadm control --reload', flush=True)
+    # Check real access for connected scanners; otherwise whether the rule is installed.
+    problems = usb.access_problems()
+    blocked = [node for _, nodes in problems for node in nodes]
+    if blocked and all(udev_rule_installed(model.pid) for model, _ in problems):
+        print(f'\nThe scanner rule is installed, but {", ".join(blocked)} is still not accessible. Unplug and replug\n'
+              f'the scanner. If that does not help, install the rule again:\n  {access_command()}', flush=True)
+    elif blocked or (not usb.connected() and not udev_rule_installed()):
+        where = f' ({", ".join(blocked)})' if blocked else ''
+        print(f'\nOne step needs your password: let your user access the scanner{where}, then unplug and\n'
+              f'replug it:\n  {access_command()}', flush=True)
     print('\nDone. Open "CrealityScan" from your app menu with the scanner connected.', flush=True)

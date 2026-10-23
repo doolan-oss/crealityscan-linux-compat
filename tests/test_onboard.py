@@ -109,15 +109,55 @@ class OnboardTests(unittest.TestCase):
              patch.dict(os.environ, {'HOME': str(self.root/'home')}):
             self.assertIsNone(onboard.find_installer())
 
-    def test_udev_rule_checked_per_scanner(self):
+    def test_udev_rule_checked_per_scanner_and_line(self):
         rules = self.root/'rules.d'; rules.mkdir()
+        installed = lambda pid: onboard.udev_rule_installed(pid, (rules, self.root/'missing'))
         (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text().split('# Creality Sermoon')[0])
-        real = Path
-        with patch('onboard.Path', side_effect=lambda p, *a: rules if p == '/etc/udev/rules.d' else real(p, *a)):
-            self.assertTrue(onboard.udev_rule_installed())
-            self.assertFalse(onboard.udev_rule_installed('0c06'))
-            (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text())
-            self.assertTrue(onboard.udev_rule_installed('0c06'))
+        self.assertTrue(installed('0c0b'))
+        self.assertFalse(installed('0c06'))
+        # A large third-party file that mentions both IDs, but never as one device.
+        (rules/'60-other.rules').write_text('SUBSYSTEM=="usb", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0401", MODE="0666"\n'
+                                            'SUBSYSTEM=="usb", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="0c06", MODE="0666"\n'
+                                            '# ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c06"\n')
+        self.assertFalse(installed('0c06'))
+        (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text())
+        self.assertTrue(installed('0c06'))
+        (rules/'70-creality-pika.rules').write_text('SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2BC5", ATTRS{idProduct}=="0C06", TAG+="uaccess"\n')
+        self.assertTrue(installed('0c06'))
+
+    def test_setup_checks_real_access_of_connected_scanners(self):
+        import usb
+        sys.path.insert(0, str(ROOT/'tests'))
+        import fakesysfs
+        fakesysfs.scanner(self.root)
+        denied = lambda node, mode: 'hidraw' not in node
+        def finish(rule_installed):
+            out = io.StringIO()
+            with patch.object(usb, 'V4L', self.root/'class/video4linux'), patch.object(usb, 'HIDRAW', self.root/'class/hidraw'), \
+                 patch('usb.os.access', side_effect=denied), patch('onboard.desktop_entry', return_value=self.root/'entry'), \
+                 patch('onboard.udev_rule_installed', return_value=rule_installed), patch('sys.stdout', out):
+                onboard.finish(self.root/'config.json')
+            return out.getvalue()
+        text = finish(False)
+        self.assertIn('let your user access the scanner (/dev/hidraw10)', text)
+        self.assertIn(onboard.access_command(), text)
+        text = finish(True)
+        self.assertIn('rule is installed, but /dev/hidraw10 is still not accessible. Unplug and replug', text)
+        self.assertIn(onboard.access_command(), text)
+        with patch.object(usb, 'V4L', self.root/'class/video4linux'), patch.object(usb, 'HIDRAW', self.root/'class/hidraw'), \
+             patch('usb.os.access', return_value=True), patch('onboard.desktop_entry', return_value=self.root/'entry'), \
+             patch('onboard.udev_rule_installed', return_value=False), patch('sys.stdout', io.StringIO()) as out:
+            onboard.finish(self.root/'config.json')
+        self.assertNotIn('sudo', out.getvalue())  # access works: nothing to fix
+
+    def test_desktop_notification_escapes_markup(self):
+        import creality
+        with patch('creality.shutil.which', return_value='/usr/bin/notify-send'), patch('creality.sys.stderr') as err, \
+             patch('creality.subprocess.run') as run:
+            err.isatty.return_value = False
+            creality.notify('Scanner access blocked: /dev/hidraw10. Run: sudo cp a b && sudo udevadm control --reload <x>')
+        self.assertEqual(run.call_args[0][0][-1],
+                         'Scanner access blocked: /dev/hidraw10. Run: sudo cp a b &amp;&amp; sudo udevadm control --reload &lt;x&gt;')
 
     def test_experimental_scanner_setting(self):
         import creality

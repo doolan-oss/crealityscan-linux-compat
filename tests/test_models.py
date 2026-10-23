@@ -121,14 +121,14 @@ class LaunchTests(unittest.TestCase):
         self.log = self.root/'log'; self.log.mkdir()
         self.config = {'data_dir': self.root, 'experimental_scanners': []}
 
-    def prepare(self, device, formats=None, helper_ok=True):
+    def prepare(self, device, formats=None, helper_ok=True, access=lambda node, mode: True):
         listed = formats or {}
         quiet = SimpleNamespace(returncode=1)
         checked = SimpleNamespace(returncode=0 if helper_ok else 2, stdout='PROFILE scanner 2bc5:0c06\n')
         def run(cmd, **kwargs):
             return checked if cmd[-1] == '--check-profile' else quiet
         with patch.object(usb, 'V4L', self.root/'class/video4linux'), patch.object(usb, 'HIDRAW', self.root/'class/hidraw'), \
-             patch('usb.subprocess.run', side_effect=run), patch('usb.os.access', return_value=True), \
+             patch('usb.subprocess.run', side_effect=run), patch('usb.os.access', side_effect=access), \
              patch('survey.enumerate_formats', side_effect=lambda node: listed.get(node, [])), \
              patch('survey.report', return_value='SURVEY REPORT'):
             e, nodes, lock = usb.prepare(self.config, self.log)
@@ -176,6 +176,20 @@ class LaunchTests(unittest.TestCase):
         listed = fakesysfs.formats_from_survey(fakesysfs.S1_SURVEY.replace('1600x1200@90/80', '1600x1200@80'))
         self.prepare(device, listed)
         self.assertIn('endpoint 0: camera does not list GREY 1600x1200 at 90 fps', (self.log/'scanner.txt').read_text())
+
+    def test_blocked_hid_node_named_with_the_fix(self):
+        import onboard
+        device = fakesysfs.scanner(self.root)
+        self.config['experimental_scanners'] = ['sermoon-s1']
+        denied = lambda node, mode: 'hidraw' not in node
+        for installed, start in ((False, 'Scanner access blocked: /dev/hidraw10. Fix once in a terminal, then unplug and replug'),
+                                 (True, 'Scanner access blocked: /dev/hidraw10. Unplug and replug the scanner.')):
+            with self.subTest(rule_installed=installed), patch('onboard.udev_rule_installed', return_value=installed), \
+                 self.assertRaises(RuntimeError) as raised:
+                self.prepare(device, access=denied)
+            message = str(raised.exception)
+            self.assertTrue(message.startswith(start), message)
+            self.assertTrue(message.endswith(onboard.access_command()), message)
 
     def test_old_helpers_are_reported_for_the_s1(self):
         device = fakesysfs.scanner(self.root)
