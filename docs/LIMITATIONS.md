@@ -9,9 +9,10 @@ on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one G
 `--gpu-name`. NVIDIA: one user's T600 laptop GPU (TUXEDO OS, KDE Wayland) passed
 setup and diagnostics with NVIDIA device access and PRIME offload; scanning on
 NVIDIA is not yet reported, and the RX 6800 XT allocation fix does not apply.
-USB support covers the Pika (USB ID 2bc5:0c0b). The Sermoon S1 (2bc5:0c06) has
-an experimental profile built from one owner's survey report, untested on the
-hardware and off by default (see USB.md). With another Creality scanner
+USB support covers the Pika (USB ID 2bc5:0c0b). The Sermoon S1 (2bc5:0c06) and
+the CR-Scan Otter (2bc5:06da) have experimental profiles built from owners'
+survey reports, untested on the hardware and off by default (see USB.md); the
+Otter is the first model with three cameras. With another Creality scanner
 connected, USB launch stops with a message pointing to `creality.py survey`, a
 read-only report owners can share to help add support.
 Other scanners, firmware, GPU families, OpenCL stacks and app versions are not

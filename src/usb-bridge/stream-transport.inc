@@ -1,10 +1,14 @@
 /* SDK mode uses raw, negotiated per-endpoint streams. All Winsock lifetime
  * management shares the process-lifetime control reference. No synthetic data. */
 static const GUID sdk_y8={0x20203859,0,0x0010,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};
+/* "Y10 ", the UVC format GUID that Windows passes on as the subtype. */
+static const GUID sdk_y10={0x20303159,0,0x0010,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};
 static BOOL sdk_format(unsigned fourcc, unsigned width, unsigned height, const GUID **subtype, DWORD *capacity, DWORD *stride) {
   DWORD pixels = width * height;
   switch (fourcc) {
   case PROFILE_FOURCC('G','R','E','Y'): *subtype=&sdk_y8; *capacity=pixels; *stride=width; return TRUE;
+  /* 10-bit samples, packed or in 16 bits as the camera sends them; the SDK unpacks. */
+  case PROFILE_FOURCC('Y','1','0',' '): *subtype=&sdk_y10; *capacity=pixels*2; *stride=0; return TRUE;
   case PROFILE_FOURCC('M','J','P','G'): *subtype=&MFVideoFormat_MJPG; *capacity=pixels*3; *stride=0; return TRUE;
   case PROFILE_FOURCC('Y','U','Y','V'): *subtype=&MFVideoFormat_YUY2; *capacity=pixels*2; *stride=width*2; return TRUE;
   /* Decoded from the camera's MJPEG by the native helper. */
@@ -15,18 +19,20 @@ static BOOL sdk_format(unsigned fourcc, unsigned width, unsigned height, const G
 }
 /* The requested type must be one this endpoint offered. */
 static BOOL sdk_profile(unsigned endpoint, REFGUID subtype, UINT64 size, UINT64 rate, DWORD *fourcc, DWORD *capacity) {
-  profile_modes modes;
-  if (endpoint > 1 || (DWORD)rate != 1 || !load_modes(endpoint, &modes)) return FALSE;
+  profile_modes *modes = malloc(sizeof(*modes));
+  BOOL found = FALSE;
+  if (!modes || endpoint >= camera_count() || (DWORD)rate != 1 || !load_modes(endpoint, modes)) { free(modes); return FALSE; }
   unsigned width = size >> 32, height = (DWORD)size, fps = rate >> 32;
-  for (unsigned i = 0; i < modes.count; i++) {
-    const profile_mode *m = &modes.modes[i];
+  for (unsigned i = 0; i < modes->count && !found; i++) {
+    const profile_mode *m = &modes->modes[i];
     const GUID *offered; DWORD stride;
     if (m->width != width || m->height != height || !sdk_format(m->fourcc, width, height, &offered, capacity, &stride) ||
         !IsEqualGUID(offered, subtype)) continue;
     for (unsigned r = 0; r < m->count; r++)
-      if (m->rates[r] == fps) { *fourcc = m->fourcc; return TRUE; }
+      if (m->rates[r] == fps) { *fourcc = m->fourcc; found = TRUE; break; }
   }
-  return FALSE;
+  free(modes);
+  return found;
 }
 static void sdk_close(camera *c) {
   /* Caller serializes with io_lock. Stop acknowledgement follows Linux cleanup. */

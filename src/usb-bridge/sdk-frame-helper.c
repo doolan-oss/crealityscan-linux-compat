@@ -1,7 +1,7 @@
-/* Streams the two explicitly selected camera endpoints of the scanner model
- * named in PIKA_USB_PID (the Pika by default). Never scans /dev or resets USB;
- * verifies VID/PID via sysfs before opening. Only the stream modes listed in
- * PIKA_MODES_0/1 (scanner-profile.h) are accepted.
+/* Streams the explicitly selected camera endpoints (two, or PIKA_CAMERAS) of
+ * the scanner model named in PIKA_USB_PID (the Pika by default). Never scans
+ * /dev or resets USB; verifies VID/PID via sysfs before opening. Only the
+ * stream modes listed in PIKA_MODES_n (scanner-profile.h) are accepted.
  */
 #define _GNU_SOURCE
 #include <arpa/inet.h>
@@ -37,7 +37,7 @@ struct capture {
   unsigned count;
   uint32_t sequence;
   unsigned frame_bytes, width, height;
-  int compressed;
+  int compressed, variable;
   struct v4l2_format previous_format;
   struct v4l2_streamparm previous_rate;
   int have_format, have_rate;
@@ -179,9 +179,14 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
   c->compressed = fourcc == V4L2_PIX_FMT_MJPEG;
   c->width = width; c->height = height;
   c->frame_bytes = width * height * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1);
+  /* Y10 frames are passed on as the camera sends them: 16-bit or packed 10-bit
+   * samples, up to 2 bytes per pixel, whatever uvcvideo reports. */
+  c->variable = c->compressed || fourcc == V4L2_PIX_FMT_Y10;
+  if (fourcc == V4L2_PIX_FMT_Y10) c->frame_bytes = width * height * 2;
   if (fmt.fmt.pix.width != width || fmt.fmt.pix.height != height ||
       fmt.fmt.pix.pixelformat != fourcc || fmt.fmt.pix.sizeimage > width * height * 3 ||
-      (!c->compressed && fmt.fmt.pix.bytesperline != width * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1))) {
+      (fourcc == V4L2_PIX_FMT_Y10 && (fmt.fmt.pix.bytesperline > width * 2 || fmt.fmt.pix.sizeimage > c->frame_bytes)) ||
+      (!c->variable && fmt.fmt.pix.bytesperline != width * (fourcc == V4L2_PIX_FMT_YUYV ? 2 : 1))) {
     fprintf(stderr, "Unsupported negotiated format; requested %ux%u %.4s\n", width, height, (char *)&fourcc); return -1;
   }
   struct v4l2_streamparm sp = {0};
@@ -240,7 +245,8 @@ static int capture_frame(struct capture *c, unsigned char *out, uint32_t *header
     return -1;
   if (b.sequence < 5 || !(b.sequence % 120)) fprintf(stderr, "DQBUF: sequence=%u bytes=%u flags=0x%x timestamp=%ld.%06ld\n",
           b.sequence, b.bytesused, b.flags, (long)b.timestamp.tv_sec, (long)b.timestamp.tv_usec);
-  int ok = b.index < c->count && (c->compressed ? b.bytesused > 0 && b.bytesused <= c->width * c->height * 3 : b.bytesused == c->frame_bytes) &&
+  int ok = b.index < c->count && (c->compressed ? b.bytesused > 0 && b.bytesused <= c->width * c->height * 3 :
+                                   c->variable ? b.bytesused > 0 && b.bytesused <= c->frame_bytes : b.bytesused == c->frame_bytes) &&
            b.bytesused <= c->lengths[b.index] &&
            !(b.flags & V4L2_BUF_FLAG_ERROR);
   if (ok) {
@@ -261,14 +267,21 @@ static int capture_frame(struct capture *c, unsigned char *out, uint32_t *header
  * MJPEG at the same size and rate. Reply errno uint32. 'N': header[8] then raw payload.
  * Header = errno, length, native sequence, flags, monotonic usec lo/hi, 0, 0.
  * 'S': stop, restore original format/rate, reply errno and close connection.
- * Both camera endpoints can stream concurrently in separate child processes.
+ * All camera endpoints can stream concurrently in separate child processes.
+ * Without PIKA_METADATA_REQUIRED=0, a frame must come with its UVC metadata.
  */
 static int load_modes(unsigned endpoint, profile_modes *modes) {
   char name[16]; snprintf(name, sizeof(name), "PIKA_MODES_%u", endpoint);
   const char *text = getenv(name);
-  if (!profile_parse_modes(text ? text : profile_default_modes[endpoint], modes)) return 0;
-  fprintf(stderr, "Invalid %s: %s\n", name, text);
+  if (!text) text = profile_default_modes_for(endpoint);
+  if (text && !profile_parse_modes(text, modes)) return 0;
+  fprintf(stderr, "Invalid %s: %s\n", name, text ? text : "(not set)");
   return -1;
+}
+static unsigned camera_count(void) {
+  const char *text = getenv("PIKA_CAMERAS");
+  unsigned cameras;
+  return text && !profile_parse_cameras(text, &cameras) ? cameras : profile_default_cameras;
 }
 static void client(int sock, const char **nodes) {
   char token[64], expected[64] = {0}; uint32_t req[6], status = 0;
@@ -277,7 +290,7 @@ static void client(int sock, const char **nodes) {
   strcpy(expected, secret);
   if (all(sock, token, 64, 0) || memcmp(token, expected, 64) || all(sock, req, sizeof(req), 0)) return;
   profile_modes modes;
-  if (req[0] != 0x324b4950 || req[1] > 1 || load_modes(req[1], &modes)) return;
+  if (req[0] != 0x324b4950 || req[1] >= camera_count() || load_modes(req[1], &modes)) return;
   fprintf(stderr, "STREAM REQUEST endpoint=%u %.4s %ux%u %ufps\n", req[1], (char *)&req[2], req[4], req[5], req[3]);
   if (!profile_find(&modes, req[2], req[4], req[5], req[3])) {
     fprintf(stderr, "Refused: mode not offered for this scanner\n"); return;
@@ -293,7 +306,10 @@ static void client(int sock, const char **nodes) {
   int convert_rgb=req[1]&&req[2]==V4L2_PIX_FMT_BGR24;
   int convert_color=convert_nv12||convert_rgb;
   struct capture c = {.fd = -1};
-  if (capture_open(&c, nodes[req[1]], getenv(req[1]?"PIKA_METADATA_1":"PIKA_METADATA_0"), convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3],
+  char metadata_name[32]; snprintf(metadata_name, sizeof(metadata_name), "PIKA_METADATA_%u", req[1]);
+  const char *optional = getenv("PIKA_METADATA_REQUIRED");
+  int metadata_required = !optional || strcmp(optional, "0");
+  if (capture_open(&c, nodes[req[1]], getenv(metadata_name), convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3],
                    width, height)) status = errno ? errno : EIO;
   if (!all(sock, &status, 4, 1) && !status) {
     unsigned char *pixels = malloc(pixel_count * 3);
@@ -313,7 +329,10 @@ static void client(int sock, const char **nodes) {
         if(capture_frame(&c,pixels,h,meta)){h[0]=errno?errno:EIO;break;}
         if(h[6])break;
       }
-      if(!h[0]&&!h[6]){h[0]=ENODATA;fprintf(stderr,"No paired UVC metadata after 8 frames\n");}
+      if(!h[0]&&!h[6]){
+        if(metadata_required){h[0]=ENODATA;fprintf(stderr,"No paired UVC metadata after 8 frames\n");}
+        else if(!(h[2]%120)||h[2]<5)fprintf(stderr,"endpoint %u: frame %u sent without UVC metadata\n",req[1],h[2]);
+      }
       unsigned char *output=pixels;
       if(!h[0]&&convert_color){
         int decoded_width=0,decoded_height=0,w=(int)width,ht=(int)height;
@@ -334,8 +353,11 @@ static int check_profile(void) {
   const char *pid = getenv("PIKA_USB_PID");
   unsigned value;
   if (pid && profile_parse_pid(pid, &value)) { fprintf(stderr, "Invalid PIKA_USB_PID: %s\n", pid); return 2; }
-  printf("PROFILE scanner 2bc5:%04x\n", scanner_pid());
-  for (unsigned endpoint = 0; endpoint < 2; endpoint++) {
+  const char *cameras = getenv("PIKA_CAMERAS");
+  unsigned count;
+  if (cameras && profile_parse_cameras(cameras, &count)) { fprintf(stderr, "Invalid PIKA_CAMERAS: %s\n", cameras); return 2; }
+  printf("PROFILE scanner 2bc5:%04x, %u cameras\n", scanner_pid(), camera_count());
+  for (unsigned endpoint = 0; endpoint < camera_count(); endpoint++) {
     profile_modes modes;
     if (load_modes(endpoint, &modes)) return 2;
     for (unsigned i = 0; i < modes.count; i++) {
@@ -349,7 +371,8 @@ static int check_profile(void) {
 }
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--check-profile")) return check_profile();
-  if (argc != 3 || !scanner_node(argv[1]) || !scanner_node(argv[2])) return 2;
+  if (argc != (int)camera_count() + 1) return 2;
+  for (int i = 1; i < argc; i++) if (!scanner_node(argv[i])) return 2;
   const char *port = getenv("PIKA_CAMERA_PORT"); char *end;
   long number = port ? strtol(port, &end, 10) : 0;
   if (!number || *end || number < 1024 || number > 65535) return 2;
@@ -361,7 +384,7 @@ int main(int argc, char **argv) {
   struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(number), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
   if (bind(listener, (void *)&a, sizeof(a)) || listen(listener, 2)) return 2;
   pid_t children[8] = {0};
-  printf("READY private raw frame service v2 for scanner 2bc5:%04x\n", scanner_pid()); fflush(stdout);
+  printf("READY private raw frame service v2 for scanner 2bc5:%04x, %u cameras\n", scanner_pid(), camera_count()); fflush(stdout);
   while (!stopping) {
     for (unsigned i = 0; i < 8; i++) if (children[i]) {
       int status; if (waitpid(children[i], &status, WNOHANG) > 0) { if (status) cleanup_failed = 1; children[i] = 0; }

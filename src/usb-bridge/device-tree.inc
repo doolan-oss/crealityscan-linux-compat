@@ -9,14 +9,21 @@ static int camera_set, parent_set, controller_handle, hub_handle;
 #define PARENT_SET ((HDEVINFO)&parent_set)
 #define CONTROLLER ((HANDLE)&controller_handle)
 #define HUB ((HANDLE)&hub_handle)
+/* Logical device instances: cameras 0-1, the composite parent, hub and host
+ * controller, then cameras 2 and up. Each indexes device_ids by its offset. */
 #define CAMERA_INST 0x6f120000u
 #define PARENT_INST 0x6f120002u
 #define HUB_INST 0x6f120003u
 #define HCD_INST 0x6f120004u
+#define EXTRA_CAMERA_INST 0x6f120005u
+static DEVINST camera_inst(unsigned i){return i<2?CAMERA_INST+i:EXTRA_CAMERA_INST+i-2;}
+static DEVINST last_inst(void){return HCD_INST+camera_count()-2;}
+static BOOL tree_inst(DEVINST id){return id>=CAMERA_INST&&id<=last_inst();}
+static BOOL camera_node(DEVINST id){return tree_inst(id)&&(id<PARENT_INST||id>HCD_INST);}
 static const GUID camera_class={0xca3e7ab9,0xb4c3,0x4ae6,{0x82,0x51,0x57,0x9e,0xf9,0x33,0x89,0x0f}};
 static const GUID image_class={0x6bdd1fc6,0x810f,0x11d0,{0xbe,0xc7,8,0,0x2b,0xe2,9,0x2f}};
 static const GUID usb_interface={0xa5dcbf10,0x6530,0x11d2,{0x90,0x1f,0,0xc0,0x4f,0xb9,0x51,0xed}};
-static WCHAR device_ids[5][512], parent_link[512], hub_name[256], driver_key[256], hid_prefix[64];
+static WCHAR device_ids[5+PROFILE_MAX_CAMERAS-2][512], parent_link[512], hub_name[256], driver_key[256], hid_prefix[64];
 static char hardware_id[32], description[128];
 static BYTE usb_descriptor[18];
 static DWORD physical_port, physical_ports, physical_address;
@@ -33,7 +40,7 @@ static HDEVINFO tree_wrap(HDEVINFO native,BOOL all){
  }
  SetupDiDestroyDeviceInfoList(native);SetLastError(ERROR_NOT_ENOUGH_MEMORY);return INVALID_HANDLE_VALUE;
 }
-static BOOL virtual_dev(SP_DEVINFO_DATA *d){return d&&d->DevInst>=CAMERA_INST&&d->DevInst<=HCD_INST;}
+static BOOL virtual_dev(SP_DEVINFO_DATA *d){return d&&tree_inst(d->DevInst);}
 static HDEVINFO native_set(HDEVINFO h){struct tree_set *t=tree_lookup(h);return t?t->native:h;}
 
 static void info_fill(SP_DEVINFO_DATA *p,DEVINST id) {
@@ -61,21 +68,21 @@ static BOOL WINAPI bridge_enum_info(HDEVINFO set,DWORD i,SP_DEVINFO_DATA *p) {
  if(t){if(i<t->count){info_fill(p,t->ids[i]);return TRUE;}return SetupDiEnumDeviceInfo(t->native,i-t->count,p);}
  if(set!=CAMERA_SET&&set!=PARENT_SET)return SetupDiEnumDeviceInfo(set,i,p);
  if(!p||p->cbSize!=sizeof(*p)){SetLastError(ERROR_INVALID_PARAMETER);return FALSE;}
- if(i>=(set==CAMERA_SET?2u:1u)){SetLastError(ERROR_NO_MORE_ITEMS);return FALSE;}
- info_fill(p,set==CAMERA_SET?CAMERA_INST+i:PARENT_INST);LOG("device info instance=%lx",p->DevInst);return TRUE;
+ if(i>=(set==CAMERA_SET?camera_count():1u)){SetLastError(ERROR_NO_MORE_ITEMS);return FALSE;}
+ info_fill(p,set==CAMERA_SET?camera_inst(i):PARENT_INST);LOG("device info instance=%lx",p->DevInst);return TRUE;
 }
 static CONFIGRET WINAPI bridge_id_size(PULONG size,DEVINST id,ULONG flags) {
- if(id>=CAMERA_INST&&id<=HCD_INST){if(!size)return CR_INVALID_POINTER;*size=lstrlenW(device_ids[id-CAMERA_INST]);return CR_SUCCESS;}
+ if(tree_inst(id)){if(!size)return CR_INVALID_POINTER;*size=lstrlenW(device_ids[id-CAMERA_INST]);return CR_SUCCESS;}
  return CM_Get_Device_ID_Size(size,id,flags);
 }
 static CONFIGRET WINAPI bridge_id(DEVINST id,PWSTR buffer,ULONG n,ULONG flags) {
- if(id>=CAMERA_INST&&id<=HCD_INST){LOG("CM device ID=%ls",device_ids[id-CAMERA_INST]);if(!buffer)return CR_INVALID_POINTER;if(n<=(ULONG)lstrlenW(device_ids[id-CAMERA_INST]))return CR_BUFFER_SMALL;lstrcpyW(buffer,device_ids[id-CAMERA_INST]);return CR_SUCCESS;}
+ if(tree_inst(id)){LOG("CM device ID=%ls",device_ids[id-CAMERA_INST]);if(!buffer)return CR_INVALID_POINTER;if(n<=(ULONG)lstrlenW(device_ids[id-CAMERA_INST]))return CR_BUFFER_SMALL;lstrcpyW(buffer,device_ids[id-CAMERA_INST]);return CR_SUCCESS;}
  return CM_Get_Device_IDW(id,buffer,n,flags);
 }
 static CONFIGRET WINAPI bridge_parent(PDEVINST parent,DEVINST id,ULONG flags) {
  if(id==PARENT_INST||id==HUB_INST){if(!parent)return CR_INVALID_POINTER;*parent=id==PARENT_INST?HUB_INST:HCD_INST;return CR_SUCCESS;}
  if(id==HCD_INST)return CR_NO_SUCH_DEVNODE;
- if(id>=CAMERA_INST&&id<PARENT_INST){if(!parent)return CR_INVALID_POINTER;*parent=PARENT_INST;return CR_SUCCESS;}
+ if(camera_node(id)){if(!parent)return CR_INVALID_POINTER;*parent=PARENT_INST;return CR_SUCCESS;}
  WCHAR native_id[512];
  if(CM_Get_Device_IDW(id,native_id,512,0)==CR_SUCCESS && *hid_prefix &&
     !wcsncmp(native_id,hid_prefix,lstrlenW(hid_prefix))) {
@@ -173,7 +180,7 @@ static HDEVINFO WINAPI bridge_classes_a(const GUID *g,PCSTR e,HWND w,DWORD flags
 }
 static BOOL WINAPI bridge_instance_a(HDEVINFO set,SP_DEVINFO_DATA *dev,CHAR *out,DWORD size,DWORD *needed) {
  if(!virtual_dev(dev))return SetupDiGetDeviceInstanceIdA(native_set(set),dev,out,size,needed);
- if(!dev||dev->DevInst<CAMERA_INST||dev->DevInst>HCD_INST){SetLastError(ERROR_INVALID_PARAMETER);return FALSE;}
+ if(!dev||!tree_inst(dev->DevInst)){SetLastError(ERROR_INVALID_PARAMETER);return FALSE;}
  WCHAR *id=device_ids[dev->DevInst-CAMERA_INST];DWORD n=lstrlenW(id)+1;if(needed)*needed=n;
  if(!out||size<n){SetLastError(ERROR_INSUFFICIENT_BUFFER);return FALSE;}
  WideCharToMultiByte(CP_ACP,0,id,-1,out,size,NULL,NULL);return TRUE;
@@ -203,7 +210,7 @@ static BOOL WINAPI bridge_registry_a(HDEVINFO set,SP_DEVINFO_DATA *dev,DWORD pro
  memset(buffer,0,n);memcpy(buffer,value,strlen(value));return TRUE;
 }
 static BOOL WINAPI bridge_detail_a(HDEVINFO set,SP_DEVICE_INTERFACE_DATA *iface,SP_DEVICE_INTERFACE_DETAIL_DATA_A *out,DWORD size,DWORD *needed,SP_DEVINFO_DATA *dev) {
- if(!iface||iface->Reserved<CAMERA_INST||iface->Reserved>HCD_INST)return SetupDiGetDeviceInterfaceDetailA(native_set(set),iface,out,size,needed,dev);
+ if(!iface||iface->Reserved>0xffffffffu||!tree_inst((DEVINST)iface->Reserved))return SetupDiGetDeviceInterfaceDetailA(native_set(set),iface,out,size,needed,dev);
  WCHAR wide[512];
  if(iface->Reserved==HUB_INST)swprintf(wide,512,L"\\\\.\\%ls",hub_name);
  else if(iface->Reserved==HCD_INST)lstrcpyW(wide,L"\\\\.\\HCD0");
@@ -282,8 +289,10 @@ static void install_device_tree(void) {
  unsigned pid=scanner_pid();
  if(!profile_env("PIKA_USB_PRODUCT",description,sizeof(description)))strcpy(description,"Creality Pika");
  snprintf(hardware_id,sizeof(hardware_id),"USB\\VID_2BC5&PID_%04X",pid);
- swprintf(hid_prefix,64,L"USB\\VID_2BC5&PID_%04X&MI_04\\",pid);
- for(unsigned i=0;i<2;i++)swprintf(device_ids[i],512,L"USB\\VID_2BC5&PID_%04X&MI_%02u\\%ls&%ls&0&0&0",pid,i*2,revision,serial);
+ /* The HID interface follows the cameras' interface pairs (4 on the Pika). */
+ unsigned cameras=camera_count();
+ swprintf(hid_prefix,64,L"USB\\VID_2BC5&PID_%04X&MI_%02u\\",pid,cameras*2);
+ for(unsigned i=0;i<cameras;i++)swprintf(device_ids[camera_inst(i)-CAMERA_INST],512,L"USB\\VID_2BC5&PID_%04X&MI_%02u\\%ls&%ls&0&0&0",pid,i*2,revision,serial);
  swprintf(device_ids[2],512,L"USB\\VID_2BC5&PID_%04X\\%ls",pid,serial);
  swprintf(parent_link,512,L"\\\\?\\usb#vid_2bc5&pid_%04x#%ls#{a5dcbf10-6530-11d2-901f-00c04fb951ed}",pid,serial);
  swprintf(hub_name,256,L"USB#PIKA_BRIDGE_HUB#%ls#{f18a0e88-c30c-11d0-8815-00a0c906bed8}",location);
@@ -316,7 +325,7 @@ static void install_device_tree(void) {
    }
   }
  }
- installed=TRUE;LOG("installed %u process-local SDK device-tree API mappings for physical scanner 2bc5:%04x (%s)",total,pid,description);
+ installed=TRUE;LOG("installed %u process-local SDK device-tree API mappings for physical scanner 2bc5:%04x (%s), %u cameras",total,pid,description,cameras);
 }
 
 void WINAPI PikaBridgePrepareSDK(void) { install_device_tree(); }
