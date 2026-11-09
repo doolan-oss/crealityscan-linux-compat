@@ -1,7 +1,16 @@
 {
-  "crealityscan_version": "4.3.2",
-  "installer_sha256": "03135d3fbdb20947332723206169e5945df7c9989461507e1f36d128dd385b20",
-  "sdk_sha256": "d36c0e8ea1e2123c5bc8288d8676608da255bffd8063e2b051dcf39c3fa79231",
+  "crealityscan": [
+    {
+      "version": "4.3.3",
+      "installer_sha256": "28045410457d8b25489a87d155e7f23761dd4b58b2de161b2770908b2e1fd49b",
+      "sdk_sha256": "698733663208ee6f4a7eecae300cbbc30e8286cd8d4c7fc49b1d19441949d740"
+    },
+    {
+      "version": "4.3.2",
+      "installer_sha256": "03135d3fbdb20947332723206169e5945df7c9989461507e1f36d128dd385b20",
+      "sdk_sha256": "d36c0e8ea1e2123c5bc8288d8676608da255bffd8063e2b051dcf39c3fa79231"
+    }
+  ],
   "runner_version": "wine-11.0-g8c33a428032 (Proton)",
   "runner_archive_url": "https://github.com/Kron4ek/Wine-Builds/releases/download/proton-exp-11.0/wine-proton-exp-11.0-amd64.tar.xz",
   "runner_archive_sha256": "75397ffd9d5af889a81209be138a5891d222fc17dc6ca40009df2e8cd2838136",

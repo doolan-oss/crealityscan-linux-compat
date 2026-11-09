@@ -1,6 +1,6 @@
 {
   "runner": "/absolute/path/to/wine-proton-exp-11.0-amd64",
-  "installer": "/absolute/path/to/CrealityScan_win_4.3.2.exe",
+  "installer": "/absolute/path/to/CrealityScan_win_4.3.3.exe",
   "dxvk_dir": "/absolute/path/to/matching/dxvk/x86_64-windows",
   "data_dir": "~/.local/share/crealityscan-linux-community",
   "gpu_name": "RX 6800 XT",

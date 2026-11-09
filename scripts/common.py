@@ -47,7 +47,13 @@ def dependencies(c,installer=False):
     accepted=[LOCK['dxvk'],*({n:h for n,h in a.items() if n.endswith('.dll')} for a in LOCK.get('dxvk_also_accepted',[]))]
     if not any(all((c['dxvk_dir']/n).is_file() and digest(c['dxvk_dir']/n)==h for n,h in a.items()) for a in accepted):
         raise RuntimeError(f'Unsupported or changed dependency: DXVK in {c["dxvk_dir"]}')
-    if installer:expect(c['installer'],LOCK['installer_sha256'])
+    if installer and not release(c['installer']):raise RuntimeError(f'Unsupported or changed dependency: {c["installer"]}')
+
+def versions():return ', '.join(r['version'] for r in LOCK['crealityscan'])
+def release(installer):
+    """The pinned CrealityScan release (version, installer and SDK hashes) this installer is, or None."""
+    h=digest(installer)
+    return next((r for r in LOCK['crealityscan'] if r['installer_sha256']==h),None)
 
 def owned(c,create=False):
     state=c['data_dir'];mark=state/'community-owner.json'
