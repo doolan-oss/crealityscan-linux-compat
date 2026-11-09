@@ -3,16 +3,21 @@
 ## Quick setup
 
 1. Install the runtime packages (no compilers needed):
-   - Arch/CachyOS: `sudo pacman -S --needed bubblewrap python psmisc procps-ng`
-   - Ubuntu 24.04: `sudo apt install bubblewrap python3 psmisc procps`
+   - Arch/CachyOS: `sudo pacman -S --needed bubblewrap python psmisc procps-ng gst-libav`
+   - Ubuntu 24.04 or newer: `sudo apt install bubblewrap python3 psmisc procps gstreamer1.0-libav`
+   - Fedora: also install `gstreamer1-plugin-openh264`
+
+   Wine plays the app's H.264 tutorial videos through your system's GStreamer.
+   Without an H.264 decoder CrealityScan closes when it plays one, which happens
+   on its first launch. Setup and `doctor` print the command if none is found.
 
    Your GPU also needs a working Vulkan driver and an OpenCL driver. The tested
    combination is an AMD RX 6800 XT with ROCm OpenCL (`rocm-opencl-runtime` on
    Arch). NVIDIA needs the proprietary driver with OpenCL; a user's NVIDIA T600
    laptop passed setup and diagnostics. Other GPUs and OpenCL drivers are
    untested (see LIMITATIONS.md).
-2. Download **CrealityScan 4.3.2 for Windows** (`CrealityScan_win_4.3.2.exe`)
-   from Creality into your Downloads folder.
+2. Download **CrealityScan 4.3.3 for Windows** (`CrealityScan_win_4.3.3.exe`)
+   from Creality into your Downloads folder. 4.3.2 is also accepted.
 3. From this repository, run:
 
    ```sh
@@ -41,8 +46,8 @@ setup builds them from source, which needs the build packages below.
 ## Manual setup and building from source
 
 The rest of this guide is the step-by-step recipe that `setup` automates, for
-custom locations or building from source. It pins the tested 4.3.2 installer,
-Wine runner and DXVK release in `config/versions.lock.json` and rejects different
+custom locations or building from source. It pins the tested CrealityScan
+installers (4.3.3 and 4.3.2), Wine runner and DXVK release in `config/versions.lock.json` and rejects different
 hashes rather than applying version-specific shims to untested binaries.
 This is functional reproducibility from pinned inputs, not a claim of
 bit-identical compiler output across toolchains or support for every GPU or
@@ -65,8 +70,8 @@ system packages, drivers, udev rules or firewall rules.
 
 ## Obtain external inputs
 
-1. Obtain **CrealityScan_win_4.3.2.exe** from Creality; expected SHA-256 is in the
-   lockfile. Keep the installer outside the repo. It contains the required x64
+1. Obtain **CrealityScan_win_4.3.3.exe** (or 4.3.2) from Creality; the expected
+   SHA-256 of each supported release is in the lockfile. Keep the installer outside the repo. It contains the required x64
    app/SDK; no Windows display driver is installed by this integration.
 2. The standalone **Kron4ek Proton Experimental 11.0 amd64** Wine distribution and
    the official **DXVK 3.1.1** release. `python3 scripts/creality.py fetch`
@@ -85,7 +90,7 @@ retain their own licenses. No external binary is committed here.
 From the repository directory, substitute real absolute paths:
 
 ```sh
-python3 scripts/creality.py configure --runner '/absolute/path/to/wine-proton-exp-11.0-amd64' --installer '/absolute/path/to/CrealityScan_win_4.3.2.exe' --dxvk-dir '/absolute/path/to/dxvk/x86_64-windows' --data-dir '/absolute/path/to/NEW-crealityscan-data'
+python3 scripts/creality.py configure --runner '/absolute/path/to/wine-proton-exp-11.0-amd64' --installer '/absolute/path/to/CrealityScan_win_4.3.3.exe' --dxvk-dir '/absolute/path/to/dxvk/x86_64-windows' --data-dir '/absolute/path/to/NEW-crealityscan-data'
 ```
 
 This exclusively creates ignored `config.local.json`; it refuses overwrite.
@@ -248,3 +253,24 @@ Removal: remove only the newly created data directory and its
 `<data-directory-hash>.json` baseline in `~/.local/share/crealityscan-linux/trust/`
 (or the checkout's `.local-trust/` for older installs). A prefix without its
 baseline is never adopted: `install` refuses it and `setup` moves it aside.
+
+## Adding a new CrealityScan version
+
+Setup accepts only installers listed under `crealityscan` in
+`config/versions.lock.json`. Each entry pairs an installer's SHA-256 with the
+SHA-256 of the `OrbbecSDK.dll` it installs, and install refuses an SDK that does
+not match its installer. The first entry is preferred when several supported
+installers are in Downloads. To check a new release before listing it:
+
+1. Install it into a throwaway `data_dir` using the project's sandbox, and record
+   the installer and `CrealityScan_Data/Plugins/x86_64/OrbbecSDK.dll` hashes.
+2. Compare the new SDK's export names with `src/usb-bridge/sdk-proxy.def`. The
+   forwarder resolves by name, so added exports are harmless unless the app
+   imports them. A removed or renamed export needs a regenerated `.def` and a
+   new helpers release.
+3. Check that the SDK still imports every function the bridge hooks (the
+   `hooks` table in `src/usb-bridge/device-tree.inc`).
+4. Run `install`, `diagnose` and `smoke` on the throwaway config. On a scan with
+   the blue-laser fix enabled, the session's `wine.log` shows
+   `Blue-laser compatibility: exact program fingerprint matched` only if the
+   OpenCL kernel is unchanged; otherwise the fix stays inactive.

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""CrealityScan 4.3.2 on Linux: setup and launcher, confined to an owned prefix."""
+"""CrealityScan (versions pinned in config/versions.lock.json) on Linux: setup and launcher, confined to an owned prefix."""
 import argparse,datetime,json,os,shutil,subprocess,sys
 from contextlib import nullcontext
 from integrity import installation_path, save_installation, verify_installation
 import stateio
 from pathlib import Path
-from common import ROOT,RUNTIME_ROOT,LOCK,load,dependencies,digest,expect,owned,environment,sandbox,winpath
+from common import ROOT,RUNTIME_ROOT,LOCK,load,dependencies,digest,expect,owned,environment,sandbox,winpath,release
 from display import open_display
 from exports import default_dir,link_folders
 from build import build
@@ -51,13 +51,14 @@ def install(c):
     if installed.exists():
         verify_install(c);print('Already installed; verified without changing the prefix.');return
     if prefix.exists()and any(prefix.iterdir()):raise RuntimeError('Incomplete/populated prefix: preserved. Choose a NEW data_dir to retry; never reset it automatically.')
+    pinned=release(c['installer'])
     prefix.mkdir(exist_ok=True);log=logdir(c,'install')
-    print('Installing into new prefix:',prefix,flush=True)
+    print(f'Installing CrealityScan {pinned["version"]} into new prefix:',prefix,flush=True)
     code=wine(c,log,[winpath(c['installer']),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',r'/DIR=C:\Program Files\CrealityScan','/LOG='+winpath(log/'installer.log')],
               extra={'LD_PRELOAD':'','WINEDLLOVERRIDES':'winemenubuilder.exe=d;opencl=b;mscoree,mshtml=d'},gpu=False,seconds=240)
     if code:raise RuntimeError('Installer failed; prefix/logs preserved')
     app=appdir(c);plugins=app/'CrealityScan_Data/Plugins/x86_64';sdk=plugins/'OrbbecSDK.dll'
-    expect(sdk,LOCK['sdk_sha256'])
+    expect(sdk,pinned['sdk_sha256'])
     if not (app/'CrealityScan.exe').is_file():raise RuntimeError('Installed executable missing')
     stateio.copy_file(sdk,plugins/'OrbbecSDK-stock.dll')
     sdklib=prefix/'drive_c/bridge-sdk';stateio.ensure_directory(sdklib);stateio.copy_file(sdk,sdklib/'OrbbecSDK.dll')
@@ -114,7 +115,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--config',type=Path,default=ROOT/'config.local.json')
     sub=ap.add_subparsers(dest='command',required=True)
     p=sub.add_parser('setup',help='download pinned inputs, configure, install, check and add a menu entry')
-    p.add_argument('--installer',help='CrealityScan_win_4.3.2.exe (default: found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
+    p.add_argument('--installer',help='CrealityScan_win_<version>.exe (default: found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
     sub.add_parser('survey',help='describe connected Creality scanners for a hardware report (read-only)')
     p=sub.add_parser('fetch',help='download the pinned Wine runner and DXVK');p.add_argument('--dir',type=Path,default=onboard.data_home()/'crealityscan-linux/runtime')
     p=sub.add_parser('configure');p.add_argument('--runner',required=True);p.add_argument('--installer',required=True);p.add_argument('--dxvk-dir',required=True);p.add_argument('--data-dir',required=True)
@@ -148,7 +149,9 @@ def main():
         print('Building from source:', 'missing '+', '.join(compilers) if compilers else 'compilers found')
         print('Runner:',subprocess.check_output([str(c['runner']/'bin/wine'),'--version'],text=True).strip())
         print('Data directory:',c['data_dir'])
-        print('Display:',c['display'],'| Exports folder:',c['exports_dir']);return
+        print('Display:',c['display'],'| Exports folder:',c['exports_dir'])
+        if not onboard.h264_decoder_installed():print(onboard.H264_HINT)
+        return
     if args.command=='build':build(c,args.portable)
     elif args.command=='install':install(c)
     elif args.command=='diagnose':diagnose(c)

@@ -1,6 +1,6 @@
 # CrealityScan on Linux — community Pika support
 
-Run **CrealityScan 4.3.2** with a **Creality Pika** scanner on Linux (other
+Run **CrealityScan 4.3.3** (or 4.3.2) with a **Creality Pika** scanner on Linux (other
 Creality scanners: [see below](#other-creality-scanners)). The app runs
 in Wine inside a sandbox, opens as normal desktop windows, and saves your scans
 to an ordinary `Documents/CrealityScan` folder. This is an unofficial,
@@ -8,21 +8,27 @@ experimental community project; you supply the CrealityScan installer yourself.
 
 Tested on CachyOS with an AMD RX 6800 XT (ROCm OpenCL) on KDE Plasma. A user
 also reports setup and the GPU check passing on TUXEDO OS with an NVIDIA T600
-laptop GPU. Other distributions and GPUs may work but are untested; read
+laptop GPU. CrealityScan 4.3.3 installs, passes the GPU check and starts on
+Ubuntu 26.10 with an NVIDIA RTX 4070 laptop GPU; scanning with 4.3.3 is not yet
+reported. Other distributions and GPUs may work but are untested; read
 [LIMITATIONS.md](docs/LIMITATIONS.md) before relying on it.
 
 ## Install
 
 1. Install the required packages:
-   - Arch/CachyOS: `sudo pacman -S --needed git bubblewrap python psmisc procps-ng`
-   - Ubuntu 24.04: `sudo apt install git bubblewrap python3 psmisc procps`
+   - Arch/CachyOS: `sudo pacman -S --needed git bubblewrap python psmisc procps-ng gst-libav`
+   - Ubuntu 24.04 or newer: `sudo apt install git bubblewrap python3 psmisc procps gstreamer1.0-libav`
+
+   The GStreamer package decodes the app's H.264 tutorial videos; without it
+   CrealityScan closes on its first launch. Setup reminds you if it is missing.
 
    Your GPU also needs a Vulkan driver and an OpenCL driver. On AMD, the tested
    OpenCL driver is ROCm (`rocm-opencl-runtime` on Arch/CachyOS). On NVIDIA, use
    the proprietary driver with its OpenCL support (`opencl-nvidia` on Arch).
    On laptops with both Intel and NVIDIA graphics, setup selects the NVIDIA GPU.
-2. Download **CrealityScan 4.3.2 for Windows** (`CrealityScan_win_4.3.2.exe`)
-   from Creality into your Downloads folder.
+2. Download **CrealityScan 4.3.3 for Windows** (`CrealityScan_win_4.3.3.exe`)
+   from Creality into your Downloads folder. The 4.3.2 installer is also
+   accepted; setup identifies either one by its checksum.
 3. Get this project and run setup:
 
    ```sh

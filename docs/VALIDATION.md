@@ -393,3 +393,30 @@ setup enables PRIME offload when it detects an NVIDIA GPU alongside an Intel or
 AMD one. On this AMD machine the sandbox still receives exactly `/dev/dri` and
 `/dev/kfd`. Unit tests cover NVIDIA node selection and when PRIME offload is
 configured. Scanning on NVIDIA has not been reported yet.
+
+## CrealityScan 4.3.3 — 9 November 2026
+
+Ubuntu 26.10, NVIDIA GeForce RTX 4070 laptop GPU alongside an integrated GPU
+(PRIME offload), desktop display, prebuilt helpers-v1, no scanner connected.
+
+- The 4.3.3 installer (product version 4.3.3, built 21 October 2026) ships a
+  changed `OrbbecSDK.dll`. Its export table keeps all 665 names the forwarder
+  was generated from and adds six, which neither `lib_orbbec_scan.dll` (the only
+  importer, by name) nor any other installed file references. All 16 functions
+  the device-tree bridge hooks are still imported by the new SDK. The existing
+  helpers therefore work unchanged; only the installer/SDK pins were added.
+- Fresh sandboxed installation and SDK/bridge deployment: passed (twice).
+- Diagnostics (OpenCL kernel, rendered OpenGL pixel, synthetic Media
+  Foundation source): passed.
+- App startup: reached HomeState with Direct3D 11 on the RTX 4070; the 35-second
+  smoke test passed with the expected timeout exit.
+- First launch of a fresh install: 4.3.3 runs a one-time migration and then
+  plays an H.264 tutorial video. Without a GStreamer H.264 decoder on the host,
+  Wine reports the missing plug-in and the app closes itself (exit 1); this
+  reproduced on a second fresh install and also with Wine's own `mf.dll` in
+  place of the bridge. Later launches skip the tutorial and run normally.
+  Setup and `doctor` now detect a missing decoder and print the package to
+  install.
+- Not tested: live USB scanning with 4.3.3, and whether the blue-laser OpenCL
+  fix still matches 4.3.3's kernel (its source is not stored as plain text in
+  the installed files, so it can only be checked during a scan).
