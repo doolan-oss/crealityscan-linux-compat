@@ -24,6 +24,11 @@ class CollectTests(unittest.TestCase):
         (new/'wine.log').write_text('[pika-camera-bridge] enumeration: \\\\?\\usb#vid_2bc5&pid_0c06&mi_00#1049&S1SERIAL42&0&0&0#{x}\n'
                                     f'path {Path.home()}/.local/share/crealityscan-linux\n')
         (new/'frames.log').write_text('x' * (collect.LIMIT + 10) + 'END\n')
+        # The bridge's own log names the scanner by its Windows device paths.
+        (new/'bridge.log').write_text('10:00:00.000 enumeration: \\\\?\\usb#vid_2bc5&pid_06da&mi_04#1&OTTER7SERIAL&0&0&0#{x}\\global\n'
+                                      '10:00:00.001 CM device ID=USB\\VID_2BC5&PID_06DA\\OTTER7SERIAL\n'
+                                      '10:00:00.002 physical USB indexed string 3: OTTER7SERIAL\n'
+                                      '10:00:00.003 XU node opened endpoint=0 node=0 unit=4 of 1\n')
         app = self.c['prefix']/'drive_c/users/steamuser'/collect.APP_LOGS
         (app/'20261020100000').mkdir(parents=True)
         session = app/'20261021174550'; session.mkdir()
@@ -42,9 +47,12 @@ class CollectTests(unittest.TestCase):
         with zipfile.ZipFile(target) as z:
             files = {n: z.read(n).decode() for n in z.namelist()}
         self.assertEqual(sorted(files), ['app-20261021174550/ScannerStreamSDK.log', 'app-20261021174550/device_info.json',
-                                         'launch-20261021-174547-065691-usb/frames.log', 'launch-20261021-174547-065691-usb/wine.log'])
+                                         'launch-20261021-174547-065691-usb/bridge.log', 'launch-20261021-174547-065691-usb/frames.log',
+                                         'launch-20261021-174547-065691-usb/wine.log'])
+        self.assertIn('XU node opened endpoint=0 node=0 unit=4', files['launch-20261021-174547-065691-usb/bridge.log'])
         everything = ''.join(files.values())
-        for secret in ('S1SERIAL42', 'OTHER123XYZ', 'do not share', 'older session', str(Path.home()), 'hunter2', 'HomeNet'):
+        for secret in ('S1SERIAL42', 'OTTER7SERIAL', 'OTHER123XYZ', 'do not share', 'older session', str(Path.home()), 'hunter2',
+                       'HomeNet'):
             self.assertNotIn(secret, everything)
         self.assertIn('SN/ID: SERIAL', everything)
         self.assertIn('SN: unknown', everything)
@@ -70,6 +78,7 @@ class CollectTests(unittest.TestCase):
         r = run('experimental')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('sermoon-s1: Creality Sermoon S1 (USB 2bc5:0c06), off', r.stdout)
+        self.assertIn('otter: Creality CR-Scan Otter (USB 2bc5:06da), off', r.stdout)
         self.assertEqual(run('experimental', 'sermoon-s1').returncode, 0)
         self.assertIn('sermoon-s1', json.loads(config.read_text())['experimental_scanners'])
         for command in ('launch', 'smoke'):  # refused cleanly by the runner check, not a Python error

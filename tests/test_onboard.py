@@ -122,6 +122,13 @@ class OnboardTests(unittest.TestCase):
         self.assertFalse(installed('0c06'))
         (rules/'70-creality-pika.rules').write_text((ROOT/'config/70-creality-pika.rules').read_text())
         self.assertTrue(installed('0c06'))
+        import models
+        for model in models.MODELS.values():  # every model's camera and HID nodes
+            text = (ROOT/'config/70-creality-pika.rules').read_text()
+            for subsystem in ('usb', 'hidraw'):
+                self.assertIn(f'SUBSYSTEM=="{subsystem}", ', text)
+                self.assertTrue(any(f'SUBSYSTEM=="{subsystem}"' in line and f'=="{model.pid}"' in line for line in text.splitlines()),
+                                (model.key, subsystem))
         (rules/'70-creality-pika.rules').write_text('SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2BC5", ATTRS{idProduct}=="0C06", TAG+="uaccess"\n')
         self.assertTrue(installed('0c06'))
 

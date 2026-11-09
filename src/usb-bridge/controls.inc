@@ -78,11 +78,12 @@ CONTROL_IDENTITY(procctl,IAMVideoProcAmp,procctl)
 static HRESULT WINAPI topo_zero(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=0;return S_OK; }
 static HRESULT WINAPI topo_category(BridgeTopology *p,DWORD i,GUID *g) { return E_INVALIDARG; }
 static HRESULT WINAPI topo_connection(BridgeTopology *p,DWORD i,BridgeConnection *g) { return E_INVALIDARG; }
-/* One topology node per extension unit of this model, in launcher order. */
-static DWORD xu_nodes(void) { profile_units units; return load_units(&units)?units.count:0; }
+/* One topology node per extension unit of this camera, in launcher order. The SDK
+ * opens the last vendor-specific node, as Windows lists them in descriptor order. */
+static DWORD xu_nodes(BridgeTopology *p) { profile_units units; return load_units(CONTAINING_RECORD(p,camera,topology)->endpoint,&units)?units.count:0; }
 static HRESULT WINAPI topo_name(BridgeTopology *p,DWORD i,WCHAR *name,DWORD size,DWORD *needed) {
  profile_units units;WCHAR model[64],text[128];
- if(!load_units(&units)||i>=units.count)return E_INVALIDARG;
+ if(!load_units(CONTAINING_RECORD(p,camera,topology)->endpoint,&units)||i>=units.count)return E_INVALIDARG;
  DWORD n=GetEnvironmentVariableW(L"PIKA_MODEL_NAME",model,64);
  if(!n||n>=64)lstrcpyW(model,L"Pika");
  swprintf(text,128,L"%ls UVC extension unit %u",model,units.units[i].unit);
@@ -91,10 +92,13 @@ static HRESULT WINAPI topo_name(BridgeTopology *p,DWORD i,WCHAR *name,DWORD size
  if(!name || size<bytes)return HRESULT_FROM_WIN32(ERROR_MORE_DATA);
  memcpy(name,text,bytes);return S_OK;
 }
-static HRESULT WINAPI topo_nodes(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=xu_nodes();return S_OK; }
-static HRESULT WINAPI topo_type(BridgeTopology *p,DWORD i,GUID *g) { if(!g)return E_POINTER;if(i>=xu_nodes())return E_INVALIDARG;*g=bridge_node_type;return S_OK; }
+static HRESULT WINAPI topo_nodes(BridgeTopology *p,DWORD *n) { if(!n)return E_POINTER;*n=xu_nodes(p);return S_OK; }
+static HRESULT WINAPI topo_type(BridgeTopology *p,DWORD i,GUID *g) { if(!g)return E_POINTER;if(i>=xu_nodes(p))return E_INVALIDARG;*g=bridge_node_type;return S_OK; }
 static HRESULT WINAPI topo_create(BridgeTopology *p,DWORD i,REFIID iid,void **out) {
- if(i>=xu_nodes())return E_INVALIDARG;
+ profile_units units;camera *c=CONTAINING_RECORD(p,camera,topology);
+ if(!load_units(c->endpoint,&units)||i>=units.count)return E_INVALIDARG;
+ /* Records which unit the SDK will send its vendor commands to. */
+ LOG("XU node opened endpoint=%u node=%lu unit=%u of %u",c->endpoint,i,units.units[i].unit,units.count);
  return topo_qi(p,iid,out);
 }
 static const BridgeTopologyVtbl topo_vtable={topo_qi,topo_add,topo_release,topo_zero,topo_category,topo_zero,topo_connection,topo_name,topo_nodes,topo_type,topo_create};
@@ -104,7 +108,7 @@ static HRESULT WINAPI ks_property(BridgeKs *p,BridgeProperty *prop,ULONG plen,vo
  BridgeNode *node=(BridgeNode*)prop;
  camera *c=CONTAINING_RECORD(p,camera,ks);
  profile_units units;
- const profile_unit *unit=load_units(&units)&&node->NodeId<units.count?&units.units[node->NodeId]:NULL;
+ const profile_unit *unit=load_units(c->endpoint,&units)&&node->NodeId<units.count?&units.units[node->NodeId]:NULL;
  if(!unit || memcmp(&prop->Set,unit->guid,16) || prop->Id<1 || prop->Id>32 || !(unit->mask>>(prop->Id-1)&1)) {
   LOG("unsupported XU request endpoint=%u node=%lu set=%08lx-%04x-%04x selector=%lu flags=%lx",c->endpoint,node->NodeId,
       prop->Set.Data1,prop->Set.Data2,prop->Set.Data3,prop->Id,prop->Flags);

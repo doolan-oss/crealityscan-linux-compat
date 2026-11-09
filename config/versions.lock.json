@@ -24,11 +24,12 @@
   ],
   "runner_tree_sha256": "bf7464300c5fdb75dfb01c954a2201c68388a44ce70189b81df63dbacc753ab4",
   "helpers": {
-    "version": "helpers-v2",
-    "url": "https://github.com/doolan-oss/crealityscan-linux-compat/releases/download/helpers-v2/crealityscan-helpers-v2.tar.gz",
-    "sha256": "dfea27188065d033bed797f2273328d69c6b0bec102fc65d62486bb1ff11d35e",
+    "version": "helpers-v3",
+    "url": "https://github.com/doolan-oss/crealityscan-linux-compat/releases/download/helpers-v3/crealityscan-helpers-v3.tar.gz",
+    "sha256": "9941a84f741afef90d493cb2332b6341c9c1d9c1b8b1b141b2f73861e7cf36b3",
     "supersedes": [
-      "402a3d1c3b5b4fb9acd2c14c6d31fc81d31f4e1c56707f09f2dd7fe7387232fb"
+      "402a3d1c3b5b4fb9acd2c14c6d31fc81d31f4e1c56707f09f2dd7fe7387232fb",
+      "e814b33be6f41d2285c110f91680d5031abba65ecc1e23c1bed77bd05e196b97"
     ]
   }
 }

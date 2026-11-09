@@ -7,7 +7,7 @@ For multiple scanners, set `scanner_serial` in ignored local configuration.
 ## Scanner models
 
 `scripts/models.py` describes each model the bridge can present to the SDK: USB
-product ID, extension units, and the camera stream modes it offers (the RGB
+product ID, extension units, and the camera stream modes of each camera (the RGB
 camera's MJPEG modes are also offered as NV12 and RGB24, decoded natively). The
 launcher passes the connected model's profile to the bridge and helpers in the
 environment (format in `src/usb-bridge/scanner-profile.h`), so a profile can
@@ -18,6 +18,7 @@ the bridge used before profiles existed.
 |---|---|---|
 | Creality Pika | 2bc5:0c0b | Supported |
 | Creality Sermoon S1 | 2bc5:0c06 | Experimental, untested; off by default |
+| Creality CR-Scan Otter | 2bc5:06da | Experimental, untested; off by default; needs helpers-v3 or newer |
 
 The Sermoon S1 profile comes from a user's `survey` report: the same interface
 layout and unit-4 extension unit as the Pika, an extra unit 6 (which the SDK is
@@ -29,17 +30,32 @@ try it:
 python3 scripts/creality.py experimental sermoon-s1
 ```
 
-then start CrealityScan as usual. Each USB launch writes `scanner.txt` (model,
+then start CrealityScan as usual.
+
+The CR-Scan Otter profile also comes from a `survey` report. The Otter differs
+more: three cameras (depth "De", IR and colour "RG", interfaces 0, 2 and 4, HID
+at interface 6), 10-bit greyscale (`Y10`) formats, and two Orbbec "ORBB"
+extension units (8 and 12) besides unit 4. The installed SDK groups its product
+ID with the Otter Lite in its `AvatarDevice` class and, like the Pika's, speaks
+the unit-4 vendor protocol. On Windows each camera has its own extension-unit
+topology and the SDK uses the last vendor-specific node of a camera, so the
+bridge gives each Otter camera only its own units, in its own descriptor order
+(`PIKA_XU_0`, `_1`, `_2`). Y10 frames are passed on exactly as the camera sends
+them, and frames that arrive without UVC metadata are passed on (and logged)
+instead of refused. To try it, run `python3 scripts/creality.py experimental otter`.
+
+Each USB launch writes `scanner.txt` (model,
 profile, each camera's extension units and the controls they list, camera
-formats; no serial) beside `wine.log`, `frames.log` (stream requests) and
+formats; no serial) beside `wine.log`, `frames.log` (stream requests),
 `controls.log` (extension-unit traffic, with the errno name of any request the
-camera refuses). For an experimental model, launch warns about extension units
+camera refuses) and `bridge.log` (what the SDK asked the bridge for: cameras and
+formats it opened, extension-unit nodes, refused requests). For an experimental model, launch warns about extension units
 that differ from the profile but continues, so that first test runs still
 produce these logs. The survey also prints the raw USB device and configuration
 descriptors, which contain no strings or serial number. `python3 scripts/creality.py logs`
 bundles those and the app's own logs, including the SDK's `ScannerStreamSDK.log`
 (which stream modes the SDK wants), into one zip file to attach to a report.
-`python3 scripts/creality.py experimental sermoon-s1 --off` turns it off again. The
+`python3 scripts/creality.py experimental sermoon-s1 --off` (or `otter --off`) turns it off again. The
 launcher also finds the device's HID nodes and forwards measured descriptors.
 
 Check Linux access first: V4L2 image/metadata and HID nodes must be readable and
@@ -54,7 +70,7 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c0b", TAG+="ua
 ```
 
 `config/70-creality-pika.rules` contains these lines and the same two for the
-Sermoon S1 (`0c06`). Desktop sessions usually get camera access automatically,
+Sermoon S1 (`0c06`) and the CR-Scan Otter (`06da`). Desktop sessions usually get camera access automatically,
 but not HID access, which is why the rule is needed. Setup and each USB launch
 check that you can open the connected scanner's camera and HID nodes. If you
 can't, they name the blocked nodes and give the command that installs the rule;

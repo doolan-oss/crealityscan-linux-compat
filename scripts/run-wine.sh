@@ -20,9 +20,12 @@ for path in filter(None, os.environ.get('LD_PRELOAD', '').split(':')):
     print('Verified x64 process preload:', path, flush=True)
 PY_CHECK
 if [[ ${PIKA_CAMERA_BACKEND:-disabled} == v4l2 ]]; then
-  /usr/bin/python3 "$CREALITY_SOURCE/src/usb-bridge/control-helper.py" "$PIKA_NODE_0" "$PIKA_NODE_1" > "$PIKA_CAPTURE_OUTPUT/controls.log" 2>&1 &
+  # One camera node per endpoint: two, or PIKA_CAMERAS for models with more.
+  cameras=("$PIKA_NODE_0" "$PIKA_NODE_1")
+  for ((i=2;i<${PIKA_CAMERAS:-2};i++)); do node="PIKA_NODE_$i"; cameras+=("${!node}"); done
+  /usr/bin/python3 "$CREALITY_SOURCE/src/usb-bridge/control-helper.py" "${cameras[@]}" > "$PIKA_CAPTURE_OUTPUT/controls.log" 2>&1 &
   helpers+=("$!")
-  "$CREALITY_SOURCE/build/sdk-frame-helper" "$PIKA_NODE_0" "$PIKA_NODE_1" > "$PIKA_CAPTURE_OUTPUT/frames.log" 2>&1 &
+  "$CREALITY_SOURCE/build/sdk-frame-helper" "${cameras[@]}" > "$PIKA_CAPTURE_OUTPUT/frames.log" 2>&1 &
   helpers+=("$!")
   for name in controls frames; do
     for ((i=0;i<50;i++)); do grep -q '^READY' "$PIKA_CAPTURE_OUTPUT/$name.log" && break; sleep .1; done

@@ -8,6 +8,8 @@ models are used only when the config lists them in experimental_scanners.
 from dataclasses import dataclass
 
 PIKA_XU_GUID = 'a15157a5c5f35e4a8d5a6854b8fa2716'
+# Orbbec's "ORBB" extension units on the CR-Scan Otter; the SDK never names them.
+ORBB_1_GUID, ORBB_2_GUID = '4f524242000000000000000000000001', '4f524242000000000000000000000002'
 
 
 @dataclass(frozen=True)
@@ -17,9 +19,15 @@ class Model:
     short: str          # in the SDK-visible extension unit names
     pid: str            # USB product ID; the vendor is always 2bc5
     units: tuple        # (unit, GUID) of each UVC extension unit the bridge exposes
-    modes: tuple        # per camera endpoint (IR, RGB): (fourcc, width, height, rates)
+    modes: tuple        # per camera endpoint (IR, RGB, ...): (fourcc, width, height, rates);
+                        # endpoint n is the camera whose VideoControl interface is 2n
     experimental: bool = False
     note: str = ''
+    # Give each camera its own extension units in its own descriptor order, as
+    # Windows does; otherwise every camera gets camera 0's order (Pika, S1).
+    units_per_camera: bool = False
+    # Refuse frames that arrive without UVC metadata (timestamps for sync).
+    needs_metadata: bool = True
 
 
 def decoded(modes):
@@ -31,6 +39,12 @@ def decoded(modes):
 
 PIKA_IR = (120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 15, 10)
 PIKA_RGB = (60, 50, 40, 30, 20, 15, 10, 5)
+OTTER_RATES = (30, 20, 15, 10, 5)
+# The Otter's depth and IR cameras list the same formats (issue #10), in this order.
+OTTER_MONO = (*(('Y10 ', w, h, OTTER_RATES) for w, h in ((320, 200), (640, 400), (1280, 800))),
+              *(('GREY', w, h, OTTER_RATES) for w, h in ((320, 200), (640, 400), (1280, 800), (800, 600))),
+              *(('MJPG', w, h, OTTER_RATES) for w, h in ((320, 200), (640, 400), (1280, 800))))
+OTTER_COLOUR_SIZES = ((320, 240), (640, 480), (1280, 720), (1280, 960), (1920, 1080), (640, 360), (1280, 800))
 
 MODELS = {m.key: m for m in (
     Model('pika', 'Creality Pika', 'Pika', '0c0b', ((4, PIKA_XU_GUID),), (
@@ -45,6 +59,16 @@ MODELS = {m.key: m for m in (
               decoded((('YUYV', 1920, 1080, (15, 10, 5)), ('YUYV', 1920, 1200, (15, 10, 5)),
                        ('MJPG', 1920, 1080, (30, 15, 10, 5)), ('MJPG', 1920, 1200, (30, 15, 10, 5))))),
           experimental=True, note='untested: no S1 owner has reported a scan yet'),
+    # From the survey in issue #10: three cameras (depth "De", IR, colour "RG"), Y10
+    # formats and two extra Orbbec units. The SDK groups 06da with the Otter Lite
+    # (0c04) in its AvatarDevice class and talks to it over the unit-4 protocol.
+    Model('otter', 'Creality CR-Scan Otter', 'CR-Scan Otter', '06da',
+          ((4, PIKA_XU_GUID), (8, ORBB_1_GUID), (12, ORBB_2_GUID)), (
+              OTTER_MONO, OTTER_MONO,
+              decoded((*(('YUYV', w, h, OTTER_RATES) for w, h in OTTER_COLOUR_SIZES),
+                       *(('MJPG', w, h, OTTER_RATES) for w, h in OTTER_COLOUR_SIZES)))),
+          experimental=True, note='untested: no Otter owner has reported a scan yet',
+          units_per_camera=True, needs_metadata=False),
 )}
 BY_PID = {m.pid: m for m in MODELS.values()}
 
@@ -82,11 +106,24 @@ def selectors(mask):
 
 def unit_report(model, cameras):
     """One line per camera listing its extension units, then a line per
-    difference from what the model expects (missing unit, other GUID, no controls)."""
+    difference from what the model expects (missing unit, other GUID, no controls).
+    Models whose cameras each have their own units only need each unit somewhere."""
     lines, problems = [], [] if cameras else ['no camera control interfaces found']
     for index, (interface, units) in enumerate(cameras):
         lines.append(f'camera {index} (interface {interface}): ' +
                      ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in units) or 'no extension units'))
+    if model.units_per_camera:
+        for unit, guid in model.units:
+            seen = [(index, g, m) for index, (_, units) in enumerate(cameras) for u, g, m in units if u == unit]
+            if not seen:
+                problems.append(f'extension unit {unit} is on no camera')
+            for index, g, m in seen:
+                if g != guid:
+                    problems.append(f'camera {index}: extension unit {unit} differs from the known hardware')
+                elif not m:
+                    problems.append(f'camera {index}: extension unit {unit} reports no controls')
+        return lines, problems
+    for index, (interface, units) in enumerate(cameras):
         for unit, guid in model.units:
             found = [m for u, g, m in units if u == unit and g == guid]
             if not found:
@@ -121,6 +158,24 @@ def environment(model, descriptors):
             for m in masks:
                 mask |= m
             xu.append(f'{unit}:{guid}:{mask or 0xffffffff:x}')
-    return {'PIKA_USB_PID': model.pid, 'PIKA_USB_PRODUCT': model.name, 'PIKA_MODEL_NAME': model.short,
-            'PIKA_MODES_0': encode_modes(model.modes[0]), 'PIKA_MODES_1': encode_modes(model.modes[1]),
-            'PIKA_XU': ';'.join(xu)}
+    e = {'PIKA_USB_PID': model.pid, 'PIKA_USB_PRODUCT': model.name, 'PIKA_MODEL_NAME': model.short,
+         **{f'PIKA_MODES_{n}': encode_modes(modes) for n, modes in enumerate(model.modes)},
+         'PIKA_XU': ';'.join(xu)}
+    # Only what differs from the bridge's defaults, so two-camera models stay as they were.
+    if len(model.modes) != 2:
+        e['PIKA_CAMERAS'] = str(len(model.modes))
+    if model.units_per_camera:
+        # The SDK sends its vendor commands to a camera's last vendor-specific
+        # node; on Windows nodes follow that camera's own descriptors.
+        by_interface = dict(cameras)
+        for n in range(len(model.modes)):
+            own = [(u, g, m) for u, g, m in by_interface.get(2*n, []) if (u, g) in model.units]
+            e[f'PIKA_XU_{n}'] = ';'.join(f'{u}:{g}:{m or 0xffffffff:x}' for u, g, m in own) or 'none'
+    if not model.needs_metadata:
+        e['PIKA_METADATA_REQUIRED'] = '0'
+    return e
+
+
+def camera_keys(model):
+    """sysfs keys ("interface:index") of each camera's capture and metadata nodes."""
+    return [f'{2*n}:{index}' for n in range(len(model.modes)) for index in (0, 1)]

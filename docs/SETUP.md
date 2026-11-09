@@ -192,7 +192,7 @@ python3 scripts/creality.py launch --mode wifi
 
 Use one command at a time. USB mode discovers the actual scanner endpoints and
 serial, verifies access/ownership, and starts private helper processes. Besides
-the Pika, the Creality Sermoon S1 has experimental support that is off by default
+the Pika, the Creality Sermoon S1 and CR-Scan Otter have experimental support that is off by default
 (`experimental_scanners` in the config); see [USB.md](USB.md). Its
 network namespace is isolated, so it cannot silently fall back to Wi-Fi.
 See [USB.md](USB.md) for permissions and cross-checkout locking.

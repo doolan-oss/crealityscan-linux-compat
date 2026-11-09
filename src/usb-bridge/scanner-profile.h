@@ -2,15 +2,20 @@
  * shared by the Windows bridge and the native helpers. Without them the
  * original Pika values apply. Plain C: no Windows or Linux headers.
  *
- * Stream modes, one variable per camera endpoint (PIKA_MODES_0 / _1):
+ * Camera endpoints (PIKA_CAMERAS): 2 to PROFILE_MAX_CAMERAS, default 2. Endpoint
+ * n is the camera whose VideoControl interface is 2n, as on every model so far.
+ * Stream modes, one variable per camera endpoint (PIKA_MODES_0 / _1 / ...):
  *   FOURCC:WIDTHxHEIGHT:RATE,RATE,...;FOURCC:...
- * FOURCC is a V4L2 code: GREY, MJPG, YUYV, or NV12/BGR3 (decoded from MJPG).
+ * FOURCC is a V4L2 code: GREY, Y10 (with its trailing space), MJPG, YUYV, or
+ * NV12/BGR3 (decoded from MJPG). Endpoints 2 and up have no default.
  * Extension units (PIKA_XU): UNIT:GUIDHEX:SELECTORMASK;... where GUIDHEX is
- * the descriptor byte order and bit n of the hex mask allows selector n+1. */
-#define PROFILE_MAX_MODES 16
+ * the descriptor byte order and bit n of the hex mask allows selector n+1.
+ * PIKA_XU_n, if set, replaces PIKA_XU for endpoint n only ("none": no units). */
+#define PROFILE_MAX_CAMERAS 4
+#define PROFILE_MAX_MODES 40
 #define PROFILE_MAX_RATES 16
-#define PROFILE_MAX_TYPES 64
-#define PROFILE_MAX_UNITS 4
+#define PROFILE_MAX_TYPES 200
+#define PROFILE_MAX_UNITS 8
 #define PROFILE_FOURCC(a, b, c, d) ((unsigned)(a) | (unsigned)(b) << 8 | (unsigned)(c) << 16 | (unsigned)(d) << 24)
 typedef struct { unsigned fourcc, width, height, count, rates[PROFILE_MAX_RATES]; } profile_mode;
 typedef struct { unsigned count; profile_mode modes[PROFILE_MAX_MODES]; } profile_modes;
@@ -23,7 +28,12 @@ static const char *const profile_default_modes[2] = {
     "NV12:1280x960:60,50,40,30,20,15,10,5;BGR3:1280x960:60,50,40,30,20,15,10,5"};
 static const char profile_default_units[] = "4:a15157a5c5f35e4a8d5a6854b8fa2716:7";
 static const unsigned profile_default_pid = 0x0c0b;
+static const unsigned profile_default_cameras = 2;
 
+/* The Pika's modes for endpoints 0 and 1; no default for others. */
+static inline const char *profile_default_modes_for(unsigned endpoint) {
+  return endpoint < 2 ? profile_default_modes[endpoint] : 0;
+}
 static inline int profile_number(const char **p, unsigned max, unsigned *out) {
   unsigned long n = 0;
   const char *s = *p;
@@ -42,7 +52,7 @@ static inline int profile_hex(char c) {
 static inline int profile_known_fourcc(unsigned f) {
   return f == PROFILE_FOURCC('G', 'R', 'E', 'Y') || f == PROFILE_FOURCC('M', 'J', 'P', 'G') ||
          f == PROFILE_FOURCC('Y', 'U', 'Y', 'V') || f == PROFILE_FOURCC('N', 'V', '1', '2') ||
-         f == PROFILE_FOURCC('B', 'G', 'R', '3');
+         f == PROFILE_FOURCC('B', 'G', 'R', '3') || f == PROFILE_FOURCC('Y', '1', '0', ' ');
 }
 /* Returns 0 for a complete, valid table; -1 leaves *out unspecified. */
 static inline int profile_parse_modes(const char *s, profile_modes *out) {
@@ -93,6 +103,16 @@ static inline int profile_parse_units(const char *s, profile_units *out) {
     if (!*s) return 0;
     if (*s++ != ';') return -1;
   }
+}
+/* An endpoint's own unit list: "none" is a valid, empty list. */
+static inline int profile_parse_endpoint_units(const char *s, profile_units *out) {
+  if (s && !__builtin_strcmp(s, "none")) { out->count = 0; return 0; }
+  return profile_parse_units(s, out);
+}
+static inline int profile_parse_cameras(const char *s, unsigned *cameras) {
+  if (!s || s[0] < '2' || s[0] > '0' + PROFILE_MAX_CAMERAS || s[1]) return -1;
+  *cameras = (unsigned)(s[0] - '0');
+  return 0;
 }
 static inline int profile_parse_pid(const char *s, unsigned *pid) {
   unsigned n = 0, digits = 0;

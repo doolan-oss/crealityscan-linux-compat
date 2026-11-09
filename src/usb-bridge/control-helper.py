@@ -4,7 +4,8 @@ selected scanner model (PIKA_USB_PID, default the Pika's 0c0b).
 Protocol: 64-byte token; <4I op,endpoint,selector,length>; request bytes;
 reply <2I errno,length> + bytes. XU ops 1 GET_LEN, 2 GET_CUR, 3 SET_CUR, with
 the extension unit in selector bits 8-15 (0, from helpers-v1 bridges, means 4).
-Units and selectors are limited to PIKA_XU (see scanner-profile.h).
+Units and selectors are limited to PIKA_XU, or PIKA_XU_n for endpoint n (see
+scanner-profile.h). One node per camera endpoint (PIKA_CAMERAS, default 2).
 Standard ops 10 QUERYCTRL, 11 G_CTRL, 12 S_CTRL use real V4L2 IDs.
 One operation per connection. No network except private loopback.
 """
@@ -31,17 +32,21 @@ assert C.sizeof(Xu) == 16
 XU_QUERY = 0xC0107521
 G_CTRL, S_CTRL, QUERYCTRL = 0xC008561B, 0xC008561C, 0xC0445624
 nodes = sys.argv[1:]
-if len(nodes) != 2:
-    raise SystemExit('usage: control-helper.py /dev/videoDEPTH /dev/videoRGB')
+if len(nodes) != int(os.environ.get('PIKA_CAMERAS', '2')) or not 2 <= len(nodes) <= 4:
+    raise SystemExit('usage: control-helper.py /dev/videoDEPTH /dev/videoRGB [more cameras, as PIKA_CAMERAS says]')
 token = os.environ['PIKA_CAMERA_TOKEN'].encode()
 if not 16 <= len(token) <= 63: raise SystemExit('invalid token')
 expected_serial = os.environ['PIKA_USB_SERIAL']
 expected_pid = os.environ.get('PIKA_USB_PID', '0c0b').lower()
-# unit -> (GUID in descriptor byte order, allowed selector bitmask)
-units = {int(u): (bytes.fromhex(g), int(m, 16)) for u, g, m in
-         (item.split(':') for item in os.environ.get('PIKA_XU', '4:a15157a5c5f35e4a8d5a6854b8fa2716:7').split(';'))}
+def parse_units(text):
+    """unit -> (GUID in descriptor byte order, allowed selector bitmask)"""
+    return {} if text == 'none' else {int(u): (bytes.fromhex(g), int(m, 16)) for u, g, m in
+                                      (item.split(':') for item in text.split(';'))}
+units = parse_units(os.environ.get('PIKA_XU', '4:a15157a5c5f35e4a8d5a6854b8fa2716:7'))
+endpoint_units = [parse_units(os.environ.get(f'PIKA_XU_{n}')) if os.environ.get(f'PIKA_XU_{n}') else units
+                  for n in range(len(nodes))]
 
-locks = [threading.RLock(), threading.RLock()]
+locks = [threading.RLock() for _ in nodes]
 state = []
 for index, node in enumerate(nodes):
     resolved = Path('/sys/class/video4linux', Path(node).name, 'device').resolve(strict=True)
@@ -55,18 +60,20 @@ for index, node in enumerate(nodes):
     # Verify the measured XU descriptors, rather than relying only on the product ID.
     cameras = camera_units((parent/'descriptors').read_bytes())
     present = {(u, bytes.fromhex(g)) for _, found in cameras for u, g, m in found}
-    assert all((unit, guid) in present for unit, (guid, mask) in units.items())
+    assert all((unit, guid) in present for unit, (guid, mask) in endpoint_units[index].items())
     # Controls this camera's own descriptors list; uvcvideo refuses others (ENOENT).
     mine = next((found for number, found in cameras if number == index*2), [])
     declared = {}
     for u, g, m in mine: declared.setdefault(u, m)
     print(f'UNITS endpoint={index} interface={index*2}: ' +
-          ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in mine) or 'none'), flush=True)
+          ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in mine) or 'none') +
+          f'; allowed {sorted(endpoint_units[index])}', flush=True)
     fd = os.open(node, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
     state.append({'fd':fd,'saved':{},'declared':declared})
 
-def xu(fd, unit, selector, query, length, payload=b''):
-    if unit not in units or not 1 <= selector <= 32 or not units[unit][1] >> (selector-1) & 1 or not 1 <= length <= 1024:
+def xu(ep, unit, selector, query, length, payload=b''):
+    fd, allowed = state[ep]['fd'], endpoint_units[ep]
+    if unit not in allowed or not 1 <= selector <= 32 or not allowed[unit][1] >> (selector-1) & 1 or not 1 <= length <= 1024:
         raise OSError(errno.EINVAL,'XU bounds')
     data = C.create_string_buffer(length)
     if payload: C.memmove(data,payload,min(length,len(payload)))
@@ -98,7 +105,7 @@ class Handler(socketserver.BaseRequestHandler):
         try:
             if self.read(64) != token.ljust(64,b'\0'): return
             op,ep,selector,n=struct.unpack('<4I',self.read(16))
-            if ep>1 or n>1024: return
+            if ep>=len(nodes) or n>1024: return
             payload=self.read(n)
             out=b''; error=0; unit=None
             try:
@@ -106,14 +113,14 @@ class Handler(socketserver.BaseRequestHandler):
                     fd=state[ep]['fd']
                     if op in (1,2,3):
                         unit=selector>>8 or 4; selector&=0xff
-                        length=int.from_bytes(xu(fd,unit,selector,0x85,2),'little')
+                        length=int.from_bytes(xu(ep,unit,selector,0x85,2),'little')
                         if not 0<length<=1024: raise OSError(errno.EOVERFLOW,'XU length')
                         if op==1: out=struct.pack('<I',length)
-                        elif op==2: out=xu(fd,unit,selector,0x81,length)
+                        elif op==2: out=xu(ep,unit,selector,0x81,length)
                         else:
                             if n != length: raise OSError(errno.EINVAL,'XU length mismatch')
                             # Unmodified SDK commands only; no firmware/update API is invoked by our probe.
-                            xu(fd,unit,selector,1,length,payload)
+                            xu(ep,unit,selector,1,length,payload)
                     elif op==10:
                         b=bytearray(68); struct.pack_into('<I',b,0,selector)
                         fcntl.ioctl(fd,QUERYCTRL,b,True); out=bytes(b)
@@ -138,7 +145,8 @@ server=Server(('127.0.0.1',int(os.environ['PIKA_CONTROL_PORT'])),Handler)
 def stop(signum,frame): threading.Thread(target=server.shutdown,daemon=True).start()
 signal.signal(signal.SIGTERM,stop)
 signal.signal(signal.SIGINT,stop)
-print(f'READY scoped UVC control helper for scanner 2bc5:{expected_pid}, extension units {sorted(units)}',flush=True)
+print(f'READY scoped UVC control helper for scanner 2bc5:{expected_pid}, extension units {sorted(units)}, '
+      f'{len(nodes)} cameras',flush=True)
 try: server.serve_forever(poll_interval=.1)
 finally:
     server.server_close()
