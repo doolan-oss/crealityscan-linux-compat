@@ -113,7 +113,8 @@ The generated attribute delegates implement public Media Foundation method
 signatures and forward calls to Wine; they do not copy Wine method bodies.
 Platform declarations are compiled against the user's external Wine headers.
 Wine's own code, headers, import libraries and license notices stay in that
-external distribution (https://gitlab.winehq.org/wine/wine/-/blob/master/COPYING.LIB).
+distribution (https://gitlab.winehq.org/wine/wine/-/blob/master/COPYING.LIB),
+which this project mirrors unmodified only as described below.
 The system OpenCL headers/loader, libyuv and DXVK also remain external dependencies
 with their own terms. This source publication does not distribute their binaries
 or purport to relicense them.
@@ -136,3 +137,19 @@ the notices below.
 - The OpenCL preload libraries and `v4l2-helper` link only the C library.
 
 DXVK, Wine and CrealityScan are not part of these archives.
+
+## Mirrored Wine runner (`wine-runner-v1` release)
+
+Kron4ek replaces the `proton-exp-11.0` build in place whenever it is rebuilt, so
+the tested build (`wine-11.0-g8c33a428032 (Proton)`, SHA-256 in
+`config/versions.lock.json`) is mirrored unmodified in this repository's
+`wine-runner-v1` release. Wine is LGPL-2.1-or-later. The release also carries:
+
+- `LGPL-2.1.txt`, the license text.
+- The corresponding source: ValveSoftware/wine at commit
+  `8c33a428032129c7ad661525b1a983b0dd8d9997`, as GitHub's archive of that commit.
+- The build scripts and patches used: Kron4ek/Wine-Builds at commit
+  `8bcb6d16ee58ea012034ae84018bce56ad9637a5`.
+
+This project did not build or modify this runner; Kron4ek's README describes how
+it is built (https://github.com/Kron4ek/Wine-Builds).
