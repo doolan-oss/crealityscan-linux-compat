@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CrealityScan 4.3.2 on Linux: setup and launcher, confined to an owned prefix."""
-import argparse,datetime,json,os,shutil,subprocess,sys
+import argparse,datetime,html,json,os,shutil,subprocess,sys
 from contextlib import nullcontext
 from integrity import installation_path, save_installation, verify_installation
 import stateio
@@ -99,7 +99,7 @@ def launch(c,mode,smoke=False):
     e={};nodes=[];scanner_lock=None
     if mode=='usb' and not smoke:
         from usb import prepare
-        e,nodes,scanner_lock=prepare(c)
+        e,nodes,scanner_lock=prepare(c,log)
     if smoke:e['DXVK_HUD']='devinfo'
     code=wine(c,log,[winpath(appdir(c)/'CrealityScan.exe'),'-logFile',winpath(log/'Player.log')],
               extra=e,devices=nodes,network=mode=='wifi' and not smoke,seconds=35 if smoke else 0,workdir=appdir(c),exports=True)
@@ -110,12 +110,35 @@ def launch(c,mode,smoke=False):
         if not success:raise RuntimeError('App startup not confirmed')
     elif code:raise RuntimeError(f'App exited {code}')
 
+def experimental(path,key,off):
+    """List experimental scanner models, or turn one on or off in the config."""
+    import models
+    choices={m.key:m for m in models.MODELS.values() if m.experimental}
+    if not path.exists():raise RuntimeError(f'No config at {path}; run setup first')
+    raw=json.loads(path.read_text());load(path)
+    enabled=raw.get('experimental_scanners') or []
+    if not key:
+        for m in choices.values():print(f'{m.key}: {m.name} (USB 2bc5:{m.pid}), {"on" if m.key in enabled else "off"}; {m.note}')
+        return
+    if key not in choices:raise ValueError(f'Unknown scanner "{key}"; choose from: {", ".join(choices)}')
+    raw['experimental_scanners']=[k for k in enabled if k!=key]+([] if off else [key])
+    temp=path.with_name(path.name+'.new')
+    temp.write_text(json.dumps(raw,indent=2)+'\n');os.replace(temp,path)
+    m=choices[key]
+    if off:print(f'Experimental {m.name} support is off.')
+    else:print(f'Experimental {m.name} support is on ({m.note}). Start CrealityScan with the scanner connected.\n'
+               f'Afterwards, "python3 scripts/creality.py logs" saves the logs to attach to your report.\n'
+               f'To turn it off again: python3 scripts/creality.py experimental {key} --off')
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--config',type=Path,default=ROOT/'config.local.json')
     sub=ap.add_subparsers(dest='command',required=True)
     p=sub.add_parser('setup',help='download pinned inputs, configure, install, check and add a menu entry')
     p.add_argument('--installer',help='CrealityScan_win_4.3.2.exe (default: found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
     sub.add_parser('survey',help='describe connected Creality scanners for a hardware report (read-only)')
+    p=sub.add_parser('experimental',help='list scanner models with experimental USB support, or turn one on')
+    p.add_argument('model',nargs='?',help='for example sermoon-s1');p.add_argument('--off',action='store_true',help='turn it off again')
+    sub.add_parser('logs',help='save the latest USB session\'s logs to one zip file for a bug report (serial numbers removed)')
     p=sub.add_parser('fetch',help='download the pinned Wine runner and DXVK');p.add_argument('--dir',type=Path,default=onboard.data_home()/'crealityscan-linux/runtime')
     p=sub.add_parser('configure');p.add_argument('--runner',required=True);p.add_argument('--installer',required=True);p.add_argument('--dxvk-dir',required=True);p.add_argument('--data-dir',required=True)
     for cmd in ('doctor','install','diagnose','smoke'):sub.add_parser(cmd)
@@ -128,8 +151,11 @@ def main():
         print('runner:',fetch.runner(args.dir));print('dxvk:',fetch.dxvk(args.dir));return
     if args.command=='setup':
         c=onboard.prepare(args.config,args.installer,args.gpu_name)
-        dependencies(c,installer=True);onboard.helpers(c,build);onboard.set_aside_incomplete(c)
+        dependencies(c,installer=True);onboard.helpers(c,build)
+        onboard.set_aside_outdated(c);onboard.set_aside_incomplete(c)
         install(c);diagnose(c);onboard.finish(args.config);return
+    if args.command=='experimental':
+        experimental(args.config,args.model,args.off);return
     if args.command=='configure':
         c=json.loads((ROOT/'config/config.example.json').read_text())
         for key in ('runner','installer','dxvk_dir','data_dir'):c[key]=str(Path(getattr(args,key)).expanduser().resolve())
@@ -149,6 +175,12 @@ def main():
         print('Runner:',subprocess.check_output([str(c['runner']/'bin/wine'),'--version'],text=True).strip())
         print('Data directory:',c['data_dir'])
         print('Display:',c['display'],'| Exports folder:',c['exports_dir']);return
+    if args.command=='logs':
+        import collect,survey
+        target,launched,app=collect.collect(c,[survey.read(d/'serial') for d in survey.scanners()])
+        print('Collected:',launched or 'no launch logs','and',app or 'no app logs')
+        print(f'Saved {target}\nAttach it to your GitHub issue. Serial numbers, Wi-Fi names and passwords, and your home\n'
+              'folder path are replaced; it still shows your GPU, CPU and Linux setup. You can open the zip to check it first.');return
     if args.command=='build':build(c,args.portable)
     elif args.command=='install':install(c)
     elif args.command=='diagnose':diagnose(c)
@@ -157,8 +189,10 @@ def main():
 
 def notify(message):
     # Menu launches have no terminal; show failures on the desktop instead.
+    # Notification bodies are markup, so "&&" in a suggested command must be escaped.
     if not sys.stderr.isatty() and shutil.which('notify-send'):
-        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner','CrealityScan could not start',message],check=False)
+        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner','CrealityScan could not start',
+                        html.escape(message,quote=False)],check=False)
 
 if __name__=='__main__':
     try:main()

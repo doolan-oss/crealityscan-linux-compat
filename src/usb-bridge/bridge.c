@@ -1,6 +1,7 @@
 /* Local experimental MF camera source. Synthetic mode never opens hardware.
  * Native Windows PE DLL; the real V4L2 transport is an opt-in local helper.
- * No scanner-specific control emulation or claim of Pika compatibility.
+ * In SDK mode the scanner model's identity and stream modes come from the
+ * launcher's environment (scanner-profile.h); without it, the Pika's apply.
  */
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
@@ -15,6 +16,7 @@
 #include <windows.h>
 #include <winsock2.h>
 #include "control-interfaces.h"
+#include "scanner-profile.h"
 
 #define WIDTH 1280
 #define HEIGHT 960
@@ -39,7 +41,7 @@ typedef struct camera {
   IAMVideoProcAmp procctl;
   LONG refs;
   CRITICAL_SECTION lock, io_lock;
-  DWORD fourcc, capacity, fps;
+  DWORD fourcc, capacity, fps, width, height;
   IMFMediaEventQueue *source_events, *stream_events;
   IMFPresentationDescriptor *pd;
   IMFStreamDescriptor *sd;
@@ -87,6 +89,36 @@ static BOOL sdk_mode(void) {
   char value[8];
   return backend_is("v4l2") && GetEnvironmentVariableA("PIKA_SDK_IDENTITY", value, sizeof(value)) && !strcmp(value, "1");
 }
+static BOOL profile_env(const char *name, char *buffer, DWORD size) {
+  DWORD n = GetEnvironmentVariableA(name, buffer, size);
+  return n && n < size;
+}
+/* USB product ID of the connected scanner model (vendor is always 2bc5). */
+static unsigned scanner_pid(void) {
+  char text[16];
+  unsigned pid;
+  if (!profile_env("PIKA_USB_PID", text, sizeof(text))) return profile_default_pid;
+  if (profile_parse_pid(text, &pid)) { LOG("invalid PIKA_USB_PID %s", text); return profile_default_pid; }
+  return pid;
+}
+static BOOL load_modes(unsigned endpoint, profile_modes *modes) {
+  char name[16], text[2048];
+  snprintf(name, sizeof(name), "PIKA_MODES_%u", endpoint);
+  const char *value = profile_env(name, text, sizeof(text)) ? text : profile_default_modes[endpoint];
+  if (!profile_parse_modes(value, modes)) return TRUE;
+  LOG("invalid %s: %s", name, value);
+  return FALSE;
+}
+static BOOL load_units(profile_units *units) {
+  char text[512];
+  const char *value = profile_env("PIKA_XU", text, sizeof(text)) ? text : profile_default_units;
+  if (!profile_parse_units(value, units)) return TRUE;
+  LOG("invalid PIKA_XU: %s", value);
+  return FALSE;
+}
+/* Media Foundation description of a native or helper-decoded V4L2 format.
+ * Stride 0 marks compressed samples. */
+static BOOL sdk_format(unsigned fourcc, unsigned width, unsigned height, const GUID **subtype, DWORD *capacity, DWORD *stride);
 static HRESULT endpoint_link(unsigned endpoint, WCHAR *out, unsigned capacity) {
   if (!sdk_mode()) {
     const WCHAR *v = backend_is("synthetic") ? synthetic_link : physical_link;
@@ -100,8 +132,8 @@ static HRESULT endpoint_link(unsigned endpoint, WCHAR *out, unsigned capacity) {
   if (endpoint > 1 || capacity < 256) return E_INVALIDARG;
   /* Virtual MF link derived from measured physical VID/PID, interface, revision
    * and serial. This is not an assertion that Wine created a PnP camera node. */
-  swprintf(out, capacity, L"\\\\?\\usb#vid_2bc5&pid_0c0b&mi_%02u#%ls&%ls&0&0&0#{e5323777-f976-4f5b-9b55-b94699c46e44}\\global",
-           endpoint * 2, revision, serial);
+  swprintf(out, capacity, L"\\\\?\\usb#vid_2bc5&pid_%04x&mi_%02u#%ls&%ls&0&0&0#{e5323777-f976-4f5b-9b55-b94699c46e44}\\global",
+           scanner_pid(), endpoint * 2, revision, serial);
   return S_OK;
 }
 
@@ -242,7 +274,7 @@ static void clear_tokens(camera *c) {
       IUnknown_Release(t);
   }
 }
-static BOOL sdk_profile(unsigned endpoint, REFGUID subtype, UINT64 rate, DWORD *fourcc, DWORD *capacity);
+static BOOL sdk_profile(unsigned endpoint, REFGUID subtype, UINT64 size, UINT64 rate, DWORD *fourcc, DWORD *capacity);
 static void sdk_close(camera *c);
 static HRESULT WINAPI source_start(IMFMediaSource *p,
                                    IMFPresentationDescriptor *pd,
@@ -281,18 +313,21 @@ static HRESULT WINAPI source_start(IMFMediaSource *p,
   if (FAILED(hr))
     return hr;
   DWORD fourcc=0,capacity=FRAME_BYTES;
-  if (!selected || size != (((UINT64)WIDTH << 32) | HEIGHT) ||
-      (sdk_mode() ? !sdk_profile(c->endpoint,&subtype,rate,&fourcc,&capacity) :
-       !IsEqualGUID(&subtype,&MFVideoFormat_L8) || rate != (((UINT64)60 << 32)|1)))
+  if (!selected || (sdk_mode() ? !sdk_profile(c->endpoint,&subtype,size,rate,&fourcc,&capacity) :
+       size != (((UINT64)WIDTH << 32) | HEIGHT) ||
+       !IsEqualGUID(&subtype,&MFVideoFormat_L8) || rate != (((UINT64)60 << 32)|1))) {
+    LOG("start refused endpoint=%u selected=%d subtype=%08lx size=%ux%u rate=%u/%u",c->endpoint,selected,subtype.Data1,
+        (unsigned)(size>>32),(unsigned)size,(unsigned)(rate>>32),(unsigned)rate);
     return MF_E_INVALIDMEDIATYPE;
+  }
   EnterCriticalSection(&c->lock);
   if (c->shutdown) {
     LeaveCriticalSection(&c->lock);
     return MF_E_SHUTDOWN;
   }
   if(FAILED(c->terminal_error)){HRESULT error=c->terminal_error;LeaveCriticalSection(&c->lock);return error;}
-  c->fourcc=fourcc;c->capacity=capacity;c->fps=rate>>32;
-  LOG("start endpoint=%u subtype=%08lx fps=%lu capacity=%lu",c->endpoint,subtype.Data1,c->fps,c->capacity);
+  c->fourcc=fourcc;c->capacity=capacity;c->fps=rate>>32;c->width=size>>32;c->height=(DWORD)size;
+  LOG("start endpoint=%u subtype=%08lx fps=%lu capacity=%lu size=%lux%lu",c->endpoint,subtype.Data1,c->fps,c->capacity,c->width,c->height);
   c->running = TRUE;
   IMFMediaEventQueue_QueueEventParamUnk(
       c->source_events, c->announced ? MEUpdatedStream : MENewStream,
@@ -547,38 +582,41 @@ static HRESULT new_source(unsigned endpoint, IMFMediaSource **out) {
   c->physical = backend_is("v4l2");
   InitializeCriticalSection(&c->lock);
   InitializeCriticalSection(&c->io_lock);
-  c->capacity=FRAME_BYTES;c->fps=60;
+  c->capacity=FRAME_BYTES;c->fps=60;c->width=WIDTH;c->height=HEIGHT;
   InterlockedIncrement(&live_sources);
-  IMFMediaType *types[32]={0};
+  IMFMediaType *types[PROFILE_MAX_TYPES]={0};
   IMFMediaTypeHandler *handler=NULL;
   HRESULT hr=MFCreateEventQueue(&c->source_events);
   if(SUCCEEDED(hr))hr=MFCreateEventQueue(&c->stream_events);
-  unsigned rate_count=sdk_mode() ? (endpoint ? sizeof(rgb_rates)/sizeof(*rgb_rates) : sizeof(ir_rates)/sizeof(*ir_rates)) : 1;
-  const unsigned *rates=endpoint ? rgb_rates : ir_rates;
-  unsigned count=rate_count*(sdk_mode()?(endpoint?4:2):1);
+  /* Synthetic and prototype sources offer one fixed 60 fps greyscale type. */
+  profile_modes modes={1,{{PROFILE_FOURCC('G','R','E','Y'),WIDTH,HEIGHT,1,{60}}}};
+  if(SUCCEEDED(hr)&&sdk_mode()&&!load_modes(endpoint,&modes))hr=E_INVALIDARG;
+  unsigned count=0;
 #define SET(call) if(SUCCEEDED(hr)) hr=(call)
-  for(unsigned i=0;i<count&&SUCCEEDED(hr);i++) {
-    BOOL mjpg=sdk_mode()&&i>=rate_count&&i<2*rate_count;
-    BOOL nv12=sdk_mode()&&endpoint&&i>=2*rate_count&&i<3*rate_count;
-    BOOL rgb=sdk_mode()&&endpoint&&i>=3*rate_count;
-    const GUID *subtype=rgb?&MFVideoFormat_RGB24:nv12?&MFVideoFormat_NV12:mjpg?&MFVideoFormat_MJPG:sdk_mode()?(endpoint?&MFVideoFormat_YUY2:&sdk_y8):&MFVideoFormat_L8;
-    unsigned fps=sdk_mode()?rates[i%rate_count]:60;
-    DWORD bytes=rgb?FRAME_BYTES*3:nv12?FRAME_BYTES*3/2:FRAME_BYTES*(sdk_mode()&&endpoint?2:1);
-    SET(MFCreateMediaType(&types[i]));
-    IMFMediaType *type=types[i];
+  for(unsigned m=0;m<modes.count&&SUCCEEDED(hr);m++)for(unsigned r=0;r<modes.modes[m].count&&SUCCEEDED(hr);r++) {
+    const profile_mode *mode=&modes.modes[m];
+    const GUID *subtype=&MFVideoFormat_L8;
+    DWORD bytes=FRAME_BYTES,stride=WIDTH;
+    if(sdk_mode()&&!sdk_format(mode->fourcc,mode->width,mode->height,&subtype,&bytes,&stride))hr=E_INVALIDARG;
+    unsigned fps=mode->rates[r];
+    SET(MFCreateMediaType(&types[count]));
+    IMFMediaType *type=types[count++];
     SET(IMFMediaType_SetGUID(type,&MF_MT_MAJOR_TYPE,&MFMediaType_Video));
     SET(IMFMediaType_SetGUID(type,&MF_MT_SUBTYPE,subtype));
-    SET(IMFMediaType_SetUINT64(type,&MF_MT_FRAME_SIZE,((UINT64)WIDTH<<32)|HEIGHT));
+    SET(IMFMediaType_SetUINT64(type,&MF_MT_FRAME_SIZE,((UINT64)mode->width<<32)|mode->height));
     SET(IMFMediaType_SetUINT64(type,&MF_MT_FRAME_RATE,((UINT64)fps<<32)|1));
     SET(IMFMediaType_SetUINT64(type,&MF_MT_FRAME_RATE_RANGE_MIN,((UINT64)fps<<32)|1));
     SET(IMFMediaType_SetUINT64(type,&MF_MT_FRAME_RATE_RANGE_MAX,((UINT64)fps<<32)|1));
     SET(IMFMediaType_SetUINT64(type,&MF_MT_PIXEL_ASPECT_RATIO,((UINT64)1<<32)|1));
     SET(IMFMediaType_SetUINT32(type,&MF_MT_INTERLACE_MODE,MFVideoInterlace_Progressive));
-    SET(IMFMediaType_SetUINT32(type,&MF_MT_SAMPLE_SIZE,mjpg?FRAME_BYTES*3:bytes));
-    if(!mjpg)SET(IMFMediaType_SetUINT32(type,&MF_MT_DEFAULT_STRIDE,nv12?WIDTH:bytes/HEIGHT));
+    SET(IMFMediaType_SetUINT32(type,&MF_MT_SAMPLE_SIZE,bytes));
+    if(stride)SET(IMFMediaType_SetUINT32(type,&MF_MT_DEFAULT_STRIDE,stride));
     SET(IMFMediaType_SetUINT32(type,&MF_MT_ALL_SAMPLES_INDEPENDENT,TRUE));
-    SET(IMFMediaType_SetUINT32(type,&MF_MT_FIXED_SIZE_SAMPLES,!mjpg));
+    SET(IMFMediaType_SetUINT32(type,&MF_MT_FIXED_SIZE_SAMPLES,stride!=0));
   }
+  if(sdk_mode()&&SUCCEEDED(hr))
+    for(unsigned m=0;m<modes.count;m++)LOG("endpoint=%u offers %.4s %ux%u at %u rates, fastest %u fps",endpoint,
+        (const char*)&modes.modes[m].fourcc,modes.modes[m].width,modes.modes[m].height,modes.modes[m].count,modes.modes[m].rates[0]);
   SET(MFCreateStreamDescriptor(0,count,types,&c->sd));
   if(sdk_mode()&&endpoint)SET(wrap_descriptor(&c->sd));
   SET(IMFStreamDescriptor_GetMediaTypeHandler(c->sd,&handler));
@@ -602,7 +640,8 @@ static HRESULT new_source(unsigned endpoint, IMFMediaSource **out) {
     return hr;
   }
   *out = &c->source;
-  LOG("created %s source", sdk_mode()?"Pika USB SDK":c->physical ? "V4L2 prototype" : "SYNTHETIC TEST");
+  if(sdk_mode())LOG("created USB SDK source for scanner 2bc5:%04x endpoint=%u",scanner_pid(),endpoint);
+  else LOG("created %s source", c->physical ? "V4L2 prototype" : "SYNTHETIC TEST");
   return S_OK;
 }
 static HRESULT WINAPI activation_qi(IMFActivate *p, REFIID iid, void **out) {
@@ -717,14 +756,19 @@ HRESULT WINAPI MFEnumDeviceSources(IMFAttributes *attrs, IMFActivate ***out,
     SET(endpoint_link(i, link, 512));
     SET(IMFAttributes_SetGUID(a->attrs, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
                               &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID));
-    SET(IMFAttributes_SetString(a->attrs, &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        sdk_mode() ? (i ? L"Creality Pika RGB Camera" : L"Creality Pika Depth Camera") :
-        (backend_is("synthetic") ? L"SYNTHETIC TEST CAMERA - NOT PIKA" : L"EXPERIMENTAL V4L2 endpoint - not SDK-ready")));
+    /* SDK mode: the USB interface names, as Windows shows them. */
+    WCHAR name[128], variable[32];
+    swprintf(variable, 32, L"PIKA_CAMERA_NAME_%u", i);
+    DWORD named = sdk_mode() ? GetEnvironmentVariableW(variable, name, 128) : 0;
+    if (!named || named >= 128)
+      lstrcpyW(name, sdk_mode() ? (i ? L"Creality Pika RGB Camera" : L"Creality Pika Depth Camera") :
+               (backend_is("synthetic") ? L"SYNTHETIC TEST CAMERA - NOT PIKA" : L"EXPERIMENTAL V4L2 endpoint - not SDK-ready"));
+    SET(IMFAttributes_SetString(a->attrs, &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, name));
     SET(IMFAttributes_SetString(a->attrs, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, link));
     if (FAILED(hr)) { activation_release(&a->iface); break; }
     (*out)[i] = &a->iface;
     ++*count;
-    LOG("enumeration: %ls", link);
+    LOG("enumeration: %ls (%ls)", link, name);
   }
   if (FAILED(hr)) {
     for (UINT32 i = 0; i < *count; i++) IMFActivate_Release((*out)[i]);

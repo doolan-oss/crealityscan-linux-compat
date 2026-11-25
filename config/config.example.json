@@ -11,5 +11,6 @@
   "device_memory_fix": true,
   "allow_host_network": false,
   "scanner_serial": null,
+  "experimental_scanners": [],
   "scanner_lock_root": null
 }

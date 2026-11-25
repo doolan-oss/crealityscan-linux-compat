@@ -27,6 +27,9 @@ def load(path):
     for key in ('blue_laser_fix','device_memory_fix'):
         if not isinstance(c.get(key),bool):raise ValueError(f'{key} must be boolean')
     if not isinstance(c.get('allow_host_network',False),bool):raise ValueError('allow_host_network must be boolean')
+    c['experimental_scanners']=c.get('experimental_scanners') or []
+    if not isinstance(c['experimental_scanners'],list) or not all(isinstance(k,str) for k in c['experimental_scanners']):
+        raise ValueError('experimental_scanners must be a list of scanner names')
     c['display']=c.get('display') or 'desktop'
     if c['display'] not in MODES:raise ValueError('display must be "desktop" or "isolated"')
     c['prefix']=c['data_dir']/'prefix'

@@ -1,4 +1,4 @@
-"""Native Pika discovery and bounded Orbbec integer-property transactions.
+"""Native scanner discovery and bounded Orbbec integer-property transactions.
 No SDK imports. Protocol framing reference recorded in README.md.
 """
 import ctypes as C
@@ -12,22 +12,30 @@ class Xu(C.Structure):
                 ('size', C.c_ushort), ('data', C.c_void_p)]
 
 
-def discover():
+PIKA = {'0c0b': ('a15157a5c5f35e4a8d5a6854b8fa2716',)}
+
+
+def discover(products=PIKA, root=Path('/sys/class/video4linux')):
+    """Connected scanners (vendor 2bc5) whose product ID is in products, which maps
+    each ID to the extension unit GUIDs its descriptors must contain. Each has its
+    camera and metadata nodes keyed "interface:index"."""
     devices = {}
-    for entry in Path('/sys/class/video4linux').glob('video*'):
+    for entry in root.glob('video*'):
         interface = (entry/'device').resolve()
         while interface != interface.parent and not (interface/'bInterfaceNumber').exists():
             interface = interface.parent
         parent = interface.parent
         try:
-            if (parent/'idVendor').read_text().strip() != '2bc5' or (parent/'idProduct').read_text().strip() != '0c0b':
+            pid = (parent/'idProduct').read_text().strip()
+            if (parent/'idVendor').read_text().strip() != '2bc5' or pid not in products:
                 continue
             serial = (parent/'serial').read_text().strip()
-            if bytes.fromhex('a15157a5c5f35e4a8d5a6854b8fa2716') not in (parent/'descriptors').read_bytes():
-                raise RuntimeError('Pika XU descriptor differs from verified hardware')
-            d = devices.setdefault(str(parent), {'serial': serial, 'usb_path': str(parent), 'nodes': {}})
+            raw = (parent/'descriptors').read_bytes()
+            if not all(bytes.fromhex(guid) in raw for guid in products[pid]):
+                raise RuntimeError('Scanner XU descriptor differs from verified hardware')
+            d = devices.setdefault(str(parent), {'serial': serial, 'pid': pid, 'usb_path': str(parent), 'nodes': {}})
             key = f"{int((interface/'bInterfaceNumber').read_text(),16)}:{int((entry/'index').read_text())}"
-            if key in d['nodes']: raise RuntimeError('Duplicate Pika endpoint')
+            if key in d['nodes']: raise RuntimeError('Duplicate scanner endpoint')
             d['nodes'][key] = '/dev/'+entry.name
         except FileNotFoundError:
             continue

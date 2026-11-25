@@ -89,7 +89,8 @@ def save_installation(c, build):
 def verify_installation(c, build):
     meta = json.loads(installation_path(c).read_text())
     if meta.get('schema') != 2 or meta.get('build') != build:
-        raise RuntimeError('Trusted installation/build baseline mismatch; use a NEW data_dir')
+        raise RuntimeError('CrealityScan was installed with other helper programs than those in build/. '
+                           'Run "python3 scripts/creality.py setup" to install it again; your scans are kept.')
     if not meta.get('files') or meta['files'] != code_manifest(c['prefix']):
         raise RuntimeError('Installed executable inventory or content changed')
     return meta['files']

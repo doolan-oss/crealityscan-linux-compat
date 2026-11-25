@@ -1,6 +1,6 @@
 /* Single explicitly selected Pika GREY endpoint. Never scans /dev or resets
  * USB. Hardware mode requires --allow-hardware and verifies VID/PID via sysfs
- * before opening. Synthetic mode is a transport fixture and makes no device
+ * (scanner-node.h) before opening. Synthetic mode is a transport fixture and makes no device
  * syscalls.
  */
 #define _GNU_SOURCE
@@ -20,6 +20,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include "scanner-profile.h"
+#include "scanner-node.h"
 #define BYTES (1280 * 960)
 struct capture {
   int fd, streaming;
@@ -55,44 +57,6 @@ static int all(int fd, void *data, size_t n, int sending) {
   }
   return 0;
 }
-static int pika_node(const char *node) {
-  const char *name = strrchr(node, '/');
-  if (!name || strncmp(node, "/dev/video", 10))
-    return 0;
-  name++;
-  for (const char *p = name + 5; *p; p++)
-    if (*p < '0' || *p > '9')
-      return 0;
-  char path[PATH_MAX], resolved[PATH_MAX], file[PATH_MAX], s[32];
-  snprintf(path, sizeof(path), "/sys/class/video4linux/%s/device", name);
-  if (!realpath(path, resolved))
-    return 0;
-  for (;;) {
-    if (snprintf(file, sizeof(file), "%s/idVendor", resolved) >=
-        (int)sizeof(file))
-      return 0;
-    FILE *f = fopen(file, "r");
-    if (f) {
-      int ok = fgets(s, sizeof(s), f) && strtoul(s, NULL, 16) == 0x2bc5;
-      fclose(f);
-      if (!ok)
-        return 0;
-      if (snprintf(file, sizeof(file), "%s/idProduct", resolved) >=
-          (int)sizeof(file))
-        return 0;
-      f = fopen(file, "r");
-      if (!f)
-        return 0;
-      ok = fgets(s, sizeof(s), f) && strtoul(s, NULL, 16) == 0x0c0b;
-      fclose(f);
-      return ok;
-    }
-    char *slash = strrchr(resolved, '/');
-    if (!slash || slash == resolved)
-      return 0;
-    *slash = 0;
-  }
-}
 static void capture_close(struct capture *c) {
   if (c->fd < 0)
     return;
@@ -116,13 +80,13 @@ static void capture_close(struct capture *c) {
 static int capture_open(struct capture *c, const char *node) {
   memset(c, 0, sizeof(*c));
   c->fd = -1;
-  if (!pika_node(node)) {
-    fprintf(stderr, "Refused non-Pika or unverified node\n");
+  if (!scanner_node(node)) {
+    fprintf(stderr, "Refused node not belonging to scanner 2bc5:%04x\n", scanner_pid());
     return -1;
   }
   c->fd = open(node, O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
   if (c->fd < 0) { perror("open video device"); return -1; }
-  fprintf(stderr, "OPEN %s verified Pika 2bc5:0c0b\n", node);
+  fprintf(stderr, "OPEN %s verified scanner 2bc5:%04x\n", node, scanner_pid());
   struct v4l2_capability cap = {0};
   if (xioctl(c->fd, VIDIOC_QUERYCAP, &cap) < 0)
     return -1;

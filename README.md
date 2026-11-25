@@ -66,8 +66,12 @@ To uninstall, delete `~/.local/share/crealityscan-linux`,
 
 ## Other Creality scanners
 
-Only the **Creality Pika** works so far: the USB bridge recognises only the Pika,
-and with another scanner connected the app stops with a message saying so.
+Only the **Creality Pika** is known to work so far. The **Sermoon S1** has
+experimental, untested support: if you have one, run
+`python3 scripts/creality.py experimental sermoon-s1` once, start CrealityScan,
+then run `python3 scripts/creality.py logs` and attach the zip file it saves to
+your hardware report, whether or not scanning worked (see [USB.md](docs/USB.md)).
+With another scanner connected the app stops with a message saying so.
 CrealityScan itself supports other Creality scanners (such as the Raptor, Otter
 and Ferret families), and they may be possible to add. If you have one:
 

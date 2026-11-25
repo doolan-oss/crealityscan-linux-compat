@@ -1,7 +1,10 @@
 #!/usr/bin/python3
-"""Scoped UVC control transport; only explicitly supplied, verified Pika nodes.
+"""Scoped UVC control transport; only explicitly supplied nodes verified as the
+selected scanner model (PIKA_USB_PID, default the Pika's 0c0b).
 Protocol: 64-byte token; <4I op,endpoint,selector,length>; request bytes;
-reply <2I errno,length> + bytes. XU ops 1 GET_LEN, 2 GET_CUR, 3 SET_CUR.
+reply <2I errno,length> + bytes. XU ops 1 GET_LEN, 2 GET_CUR, 3 SET_CUR, with
+the extension unit in selector bits 8-15 (0, from helpers-v1 bridges, means 4).
+Units and selectors are limited to PIKA_XU (see scanner-profile.h).
 Standard ops 10 QUERYCTRL, 11 G_CTRL, 12 S_CTRL use real V4L2 IDs.
 One operation per connection. No network except private loopback.
 """
@@ -16,6 +19,9 @@ import socketserver
 import struct
 import sys
 import threading
+# The launcher's scanner models (scripts/ is mounted beside src/ in the sandbox).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'scripts'))
+from models import camera_units, selectors
 
 class Xu(C.Structure):
     _fields_ = [('unit', C.c_ubyte), ('selector', C.c_ubyte), ('query', C.c_ubyte),
@@ -30,6 +36,11 @@ if len(nodes) != 2:
 token = os.environ['PIKA_CAMERA_TOKEN'].encode()
 if not 16 <= len(token) <= 63: raise SystemExit('invalid token')
 expected_serial = os.environ['PIKA_USB_SERIAL']
+expected_pid = os.environ.get('PIKA_USB_PID', '0c0b').lower()
+# unit -> (GUID in descriptor byte order, allowed selector bitmask)
+units = {int(u): (bytes.fromhex(g), int(m, 16)) for u, g, m in
+         (item.split(':') for item in os.environ.get('PIKA_XU', '4:a15157a5c5f35e4a8d5a6854b8fa2716:7').split(';'))}
+
 locks = [threading.RLock(), threading.RLock()]
 state = []
 for index, node in enumerate(nodes):
@@ -38,21 +49,28 @@ for index, node in enumerate(nodes):
     while not (interface / 'bInterfaceNumber').exists(): interface = interface.parent
     parent = interface.parent
     assert (parent/'idVendor').read_text().strip() == '2bc5'
-    assert (parent/'idProduct').read_text().strip() == '0c0b'
+    assert (parent/'idProduct').read_text().strip() == expected_pid
     assert (parent/'serial').read_text().strip() == expected_serial
     assert int((interface/'bInterfaceNumber').read_text().strip(),16) == index*2
-    # Verify the measured XU descriptor, rather than relying only on the product ID.
-    descriptors = (parent/'descriptors').read_bytes()
-    xu_guid = bytes.fromhex('a15157a5c5f35e4a8d5a6854b8fa2716')
-    assert xu_guid in descriptors
+    # Verify the measured XU descriptors, rather than relying only on the product ID.
+    cameras = camera_units((parent/'descriptors').read_bytes())
+    present = {(u, bytes.fromhex(g)) for _, found in cameras for u, g, m in found}
+    assert all((unit, guid) in present for unit, (guid, mask) in units.items())
+    # Controls this camera's own descriptors list; uvcvideo refuses others (ENOENT).
+    mine = next((found for number, found in cameras if number == index*2), [])
+    declared = {}
+    for u, g, m in mine: declared.setdefault(u, m)
+    print(f'UNITS endpoint={index} interface={index*2}: ' +
+          ('; '.join(f'unit {u} {g} selectors {selectors(m)}' for u, g, m in mine) or 'none'), flush=True)
     fd = os.open(node, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
-    state.append({'fd':fd,'saved':{}})
+    state.append({'fd':fd,'saved':{},'declared':declared})
 
-def xu(fd, selector, query, length, payload=b''):
-    if selector not in (1,2,3) or not 1 <= length <= 1024: raise OSError(errno.EINVAL,'XU bounds')
+def xu(fd, unit, selector, query, length, payload=b''):
+    if unit not in units or not 1 <= selector <= 32 or not units[unit][1] >> (selector-1) & 1 or not 1 <= length <= 1024:
+        raise OSError(errno.EINVAL,'XU bounds')
     data = C.create_string_buffer(length)
     if payload: C.memmove(data,payload,min(length,len(payload)))
-    arg = Xu(4,selector,query,length,C.addressof(data))
+    arg = Xu(unit,selector,query,length,C.addressof(data))
     if libc.ioctl(fd,XU_QUERY,C.byref(arg)) < 0:
         e=C.get_errno(); raise OSError(e,os.strerror(e))
     return data.raw
@@ -82,19 +100,20 @@ class Handler(socketserver.BaseRequestHandler):
             op,ep,selector,n=struct.unpack('<4I',self.read(16))
             if ep>1 or n>1024: return
             payload=self.read(n)
-            out=b''; error=0
+            out=b''; error=0; unit=None
             try:
                 with locks[ep]:
                     fd=state[ep]['fd']
                     if op in (1,2,3):
-                        length=int.from_bytes(xu(fd,selector,0x85,2),'little')
+                        unit=selector>>8 or 4; selector&=0xff
+                        length=int.from_bytes(xu(fd,unit,selector,0x85,2),'little')
                         if not 0<length<=1024: raise OSError(errno.EOVERFLOW,'XU length')
                         if op==1: out=struct.pack('<I',length)
-                        elif op==2: out=xu(fd,selector,0x81,length)
+                        elif op==2: out=xu(fd,unit,selector,0x81,length)
                         else:
                             if n != length: raise OSError(errno.EINVAL,'XU length mismatch')
                             # Unmodified SDK commands only; no firmware/update API is invoked by our probe.
-                            xu(fd,selector,1,length,payload)
+                            xu(fd,unit,selector,1,length,payload)
                     elif op==10:
                         b=bytearray(68); struct.pack_into('<I',b,0,selector)
                         fcntl.ioctl(fd,QUERYCTRL,b,True); out=bytes(b)
@@ -105,9 +124,10 @@ class Handler(socketserver.BaseRequestHandler):
                         ctrl_set(fd,selector,struct.unpack('<i',payload)[0])
                     else: raise OSError(errno.ENOTSUP,'operation')
             except OSError as e: error=e.errno
-            print(json.dumps({'op':op,'endpoint':ep,'selector':selector,'request_length':n,
+            declared=bool(state[ep]['declared'].get(unit,0)>>(selector-1)&1) if unit and selector else None
+            print(json.dumps({'op':op,'endpoint':ep,'unit':unit,'selector':selector,'declared':declared,'request_length':n,
                               'request_header':payload[:24].hex() if op==3 else None,
-                              'response_length':len(out),'errno':error}),flush=True)
+                              'response_length':len(out),'errno':error,'error':errno.errorcode.get(error)}),flush=True)
             self.request.sendall(struct.pack('<2I',error,len(out))+out)
         except (OSError,EOFError): return
 class Server(socketserver.ThreadingTCPServer):
@@ -118,7 +138,7 @@ server=Server(('127.0.0.1',int(os.environ['PIKA_CONTROL_PORT'])),Handler)
 def stop(signum,frame): threading.Thread(target=server.shutdown,daemon=True).start()
 signal.signal(signal.SIGTERM,stop)
 signal.signal(signal.SIGINT,stop)
-print('READY scoped Pika UVC control helper',flush=True)
+print(f'READY scoped UVC control helper for scanner 2bc5:{expected_pid}, extension units {sorted(units)}',flush=True)
 try: server.serve_forever(poll_interval=.1)
 finally:
     server.server_close()

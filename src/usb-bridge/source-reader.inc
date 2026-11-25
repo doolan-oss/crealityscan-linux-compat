@@ -20,20 +20,31 @@ static HRESULT WINAPI reader_native(IMFSourceReaderEx*p,DWORD i,DWORD t,IMFMedia
  return IMFSourceReader_GetNativeMediaType(r->real,i,t,o);
 }
 FORWARD(reader_current,GetCurrentMediaType,(IMFSourceReaderEx*p,DWORD i,IMFMediaType**o),(reader_from(p)->real,i,o))
+/* Records which formats the SDK asks for; useful when adding a scanner model. */
+static void log_type(const char *what,camera *c,IMFMediaType *t,HRESULT hr){
+ GUID subtype={0};UINT64 size=0,rate=0;
+ if(t){IMFMediaType_GetGUID(t,&MF_MT_SUBTYPE,&subtype);IMFMediaType_GetUINT64(t,&MF_MT_FRAME_SIZE,&size);IMFMediaType_GetUINT64(t,&MF_MT_FRAME_RATE,&rate);}
+ LOG("reader %s endpoint=%u subtype=%08lx size=%ux%u rate=%u/%u result=%lx",what,c->endpoint,subtype.Data1,
+     (unsigned)(size>>32),(unsigned)size,(unsigned)(rate>>32),(unsigned)rate,hr);
+}
 static HRESULT WINAPI reader_set_current(IMFSourceReaderEx*p,DWORD i,DWORD*reserved,IMFMediaType*t){
- bridge_reader*r=reader_from(p);camera*c=from_source(r->source);GUID subtype;
+ bridge_reader*r=reader_from(p);camera*c=from_source(r->source);GUID subtype;UINT64 size=0;
  /* Decode RGB in the native helper so the real UVC metadata remains attached.
   * Wine's RGB transform discards that metadata, breaking sensor synchronization. */
  if(t&&c->endpoint&&SUCCEEDED(IMFMediaType_GetGUID(t,&MF_MT_SUBTYPE,&subtype))&&IsEqualGUID(&subtype,&MFVideoFormat_RGB24)){
+  if(FAILED(IMFMediaType_GetUINT64(t,&MF_MT_FRAME_SIZE,&size))||!size)size=((UINT64)WIDTH<<32)|HEIGHT;
+  DWORD width=size>>32,height=(DWORD)size;
   IMFMediaType*rgb=NULL;HRESULT hr=MFCreateMediaType(&rgb);
   if(SUCCEEDED(hr))hr=IMFMediaType_CopyAllItems(t,(IMFAttributes*)rgb);
-  if(SUCCEEDED(hr))hr=IMFMediaType_SetUINT32(rgb,&MF_MT_DEFAULT_STRIDE,WIDTH*3);
-  if(SUCCEEDED(hr))hr=IMFMediaType_SetUINT32(rgb,&MF_MT_SAMPLE_SIZE,FRAME_BYTES*3);
+  if(SUCCEEDED(hr))hr=IMFMediaType_SetUINT32(rgb,&MF_MT_DEFAULT_STRIDE,width*3);
+  if(SUCCEEDED(hr))hr=IMFMediaType_SetUINT32(rgb,&MF_MT_SAMPLE_SIZE,width*height*3);
   if(SUCCEEDED(hr))hr=pin_descriptor(c->sd,rgb);
   if(SUCCEEDED(hr))hr=IMFSourceReader_SetCurrentMediaType(r->real,i,reserved,rgb);
+  log_type("SetCurrentMediaType RGB24 decoded natively",c,t,hr);
   if(rgb)IMFMediaType_Release(rgb);return hr;
  }
- return IMFSourceReader_SetCurrentMediaType(r->real,i,reserved,t);
+ HRESULT hr=IMFSourceReader_SetCurrentMediaType(r->real,i,reserved,t);
+ log_type("SetCurrentMediaType",c,t,hr);return hr;
 }
 FORWARD(reader_position,SetCurrentPosition,(IMFSourceReaderEx*p,REFGUID f,REFPROPVARIANT v),(reader_from(p)->real,f,v))
 FORWARD(reader_read,ReadSample,(IMFSourceReaderEx*p,DWORD i,DWORD f,DWORD*a,DWORD*s,LONGLONG*t,IMFSample**sample),(reader_from(p)->real,i,f,a,s,t,sample))
@@ -47,7 +58,7 @@ static HRESULT WINAPI reader_set_native(IMFSourceReaderEx*p,DWORD index,IMFMedia
  bridge_reader*r=reader_from(p);camera*c=from_source(r->source);
  HRESULT hr=pin_descriptor(c->sd,t);
  if(SUCCEEDED(hr))hr=IMFSourceReader_SetCurrentMediaType(r->real,index,NULL,t);
- LOG("reader SetNativeMediaType endpoint=%u result=%lx",c->endpoint,hr);return hr;
+ log_type("SetNativeMediaType",c,t,hr);return hr;
 }
 static HRESULT WINAPI reader_add_transform(IMFSourceReaderEx*p,DWORD i,IUnknown*t){return E_NOTIMPL;}
 static HRESULT WINAPI reader_remove_transform(IMFSourceReaderEx*p,DWORD i){return E_NOTIMPL;}
