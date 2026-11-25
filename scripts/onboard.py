@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from common import LOCK, ROOT, digest, load, owned
+from common import LOCK, ROOT, digest, load, owned, release, versions
 from exports import default_dir
 import fetch
 import gpuinfo
@@ -25,16 +25,25 @@ def downloads_dir():
     return Path(out) if out and Path(out).is_absolute() else Path.home()/'Downloads'
 
 
-def find_installer():
-    """The pinned CrealityScan installer in Downloads or home, matched by checksum."""
+def installer_candidates():
+    """CrealityScan*.exe files in Downloads, then home, newest name first."""
+    found = []
     for folder in (downloads_dir(), Path.home()):
         try:
-            candidates = sorted(p for p in folder.iterdir() if p.suffix.lower() == '.exe'
-                                and 'crealityscan' in p.name.lower() and p.is_file())
+            found += sorted((p for p in folder.iterdir() if p.suffix.lower() == '.exe'
+                             and 'crealityscan' in p.name.lower() and p.is_file()), reverse=True)
         except OSError:
             continue
-        for p in candidates:
-            if digest(p) == LOCK['installer_sha256']:
+    return found
+
+
+def find_installer():
+    """A pinned CrealityScan installer in Downloads or home, matched by checksum.
+    Each release is tried in lock order, so the first listed (newest) wins."""
+    candidates = [(p, release(p)) for p in installer_candidates()]
+    for pinned in LOCK['crealityscan']:
+        for p, r in candidates:
+            if r is pinned:
                 return p
     return None
 
@@ -65,7 +74,7 @@ def desktop_entry(config, folder=None):
     command = [python, ROOT/'scripts/creality.py', '--config', Path(config).resolve(), 'launch', '--mode', 'usb']
     path.write_text('\n'.join([
         '[Desktop Entry]', 'Type=Application', 'Name=CrealityScan',
-        'Comment=CrealityScan 4.3.2 for the Creality Pika (Linux compatibility launcher)',
+        'Comment=CrealityScan for the Creality Pika (Linux compatibility launcher)',
         'Exec=' + ' '.join(desktop_quote(a) for a in command),
         'Icon=scanner', 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe',
         'Categories=Graphics;3DGraphics;', '']))
@@ -81,6 +90,23 @@ def udev_rule_installed():
         except OSError:
             continue
     return False
+
+
+# GStreamer plugins Wine can decode H.264 with. The app plays H.264 tutorial
+# videos (the first launch shows one) and closes when decoding fails.
+H264_PLUGINS = ('libgstlibav.so', 'libgstopenh264.so')
+GSTREAMER_DIRS = tuple(Path(p) for p in ('/usr/lib/x86_64-linux-gnu/gstreamer-1.0', '/usr/lib64/gstreamer-1.0',
+                                         '/usr/lib/gstreamer-1.0'))
+H264_HINT = ('Install an H.264 video decoder for GStreamer, or CrealityScan closes when it plays its tutorial\n'
+             'video (shown on first launch):\n'
+             '  Ubuntu/Debian: sudo apt install gstreamer1.0-libav\n'
+             '  Arch/CachyOS:  sudo pacman -S --needed gst-libav\n'
+             '  Fedora:        sudo dnf install gstreamer1-plugin-openh264')
+
+
+def h264_decoder_installed(dirs=GSTREAMER_DIRS):
+    """True when the host GStreamer (used by Wine inside the sandbox's /usr) can decode H.264."""
+    return any((d/name).is_file() for d in dirs for name in H264_PLUGINS)
 
 
 def other_gpu_present(drm=Path('/sys/class/drm')):
@@ -117,15 +143,21 @@ def prepare(config, installer=None, gpu_name=None):
         return load(config)
     installer = Path(installer).expanduser().resolve() if installer else find_installer()
     if not installer:
-        raise RuntimeError('CrealityScan_win_4.3.2.exe not found in Downloads. Download CrealityScan '
-                           '4.3.2 for Windows from Creality, then rerun setup (or pass --installer PATH)')
-    if digest(installer) != LOCK['installer_sha256']:
-        raise RuntimeError(f'{installer} is not the tested CrealityScan 4.3.2 installer')
+        others = installer_candidates()
+        if others:
+            raise RuntimeError(f'{others[0]} is not a tested CrealityScan installer (its SHA-256 matches none of '
+                               f'{versions()}). Download a supported version for Windows from Creality, or '
+                               'see docs/SETUP.md for adding a new version')
+        raise RuntimeError(f'No CrealityScan installer found in Downloads. Download CrealityScan {versions()} '
+                           'for Windows from Creality, then rerun setup (or pass --installer PATH)')
+    pinned = release(installer)
+    if not pinned:
+        raise RuntimeError(f'{installer} is not a tested CrealityScan installer ({versions()})')
     gpu_name = gpu_name or detect_gpu()
     if not gpu_name:
         raise RuntimeError('No OpenCL GPU found. Install your GPU OpenCL driver (docs/SETUP.md), '
                            'or pass --gpu-name with your GPU model')
-    print('GPU:', gpu_name, '| Installer:', installer, flush=True)
+    print('GPU:', gpu_name, f'| CrealityScan {pinned["version"]} installer:', installer, flush=True)
     write_config(config, gpu_name, installer)
     return load(config)
 
@@ -170,4 +202,6 @@ def finish(config):
     if not udev_rule_installed():
         print('\nOne step needs your password: let your user access the scanner, then replug it:\n'
               f'  sudo cp {UDEV_RULE} /etc/udev/rules.d/ && sudo udevadm control --reload', flush=True)
+    if not h264_decoder_installed():
+        print('\n' + H264_HINT, flush=True)
     print('\nDone. Open "CrealityScan" from your app menu with the scanner connected.', flush=True)

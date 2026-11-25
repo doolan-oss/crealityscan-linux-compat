@@ -21,6 +21,11 @@ def sha(path):
     return common.digest(path)
 
 
+def release(version, installer):
+    """A lock entry for installer (or for no file at all, when installer is None)."""
+    return {'version': version, 'installer_sha256': sha(installer) if installer else '0'*64, 'sdk_sha256': '0'*64}
+
+
 def tar(path, members):
     with tarfile.open(path, 'w:gz') as t:
         for name, data in members.items():
@@ -102,12 +107,40 @@ class OnboardTests(unittest.TestCase):
         (downloads/'CrealityScan_win_4.3.2.exe').write_bytes(b'not the installer')
         real = downloads/'CrealityScan_win_4.3.2 (1).exe'; real.write_bytes(b'installer')
         with patch('onboard.downloads_dir', return_value=downloads), \
-             patch.dict(onboard.LOCK, {'installer_sha256': sha(real)}):
+             patch.dict(onboard.LOCK, {'crealityscan': [release('4.3.2', real)]}):
             self.assertEqual(onboard.find_installer(), real)
         with patch('onboard.downloads_dir', return_value=downloads), \
-             patch.dict(onboard.LOCK, {'installer_sha256': '0'*64}), \
+             patch.dict(onboard.LOCK, {'crealityscan': [release('4.3.2', None)]}), \
              patch.dict(os.environ, {'HOME': str(self.root/'home')}):
             self.assertIsNone(onboard.find_installer())
+
+    def test_installer_prefers_first_pinned_release(self):
+        downloads = self.root/'Downloads'; downloads.mkdir()
+        old = downloads/'CrealityScan_win_4.3.2.exe'; old.write_bytes(b'old installer')
+        new = downloads/'CrealityScan_win_4.3.3.exe'; new.write_bytes(b'new installer')
+        lock = {'crealityscan': [release('4.3.3', new), release('4.3.2', old)]}
+        with patch('onboard.downloads_dir', return_value=downloads), patch.dict(onboard.LOCK, lock):
+            self.assertEqual(onboard.find_installer(), new)
+            self.assertEqual(common.release(old)['version'], '4.3.2')
+            new.unlink()
+            self.assertEqual(onboard.find_installer(), old)
+
+    def test_untested_installer_named_in_error(self):
+        downloads = self.root/'Downloads'; downloads.mkdir()
+        (downloads/'CrealityScan_win_9.9.9.exe').write_bytes(b'unknown build')
+        with patch('onboard.downloads_dir', return_value=downloads), \
+             patch.dict(onboard.LOCK, {'crealityscan': [release('4.3.3', None)]}), \
+             patch.dict(os.environ, {'HOME': str(self.root/'home')}), \
+             self.assertRaisesRegex(RuntimeError, r'CrealityScan_win_9\.9\.9\.exe is not a tested.*4\.3\.3'):
+            onboard.prepare(self.root/'config.json')
+        self.assertFalse((self.root/'config.json').exists())
+
+    def test_h264_decoder_detected_from_gstreamer_plugins(self):
+        plugins = self.root/'gstreamer-1.0'; plugins.mkdir()
+        (plugins/'libgstvideoparsersbad.so').write_bytes(b'')
+        self.assertFalse(onboard.h264_decoder_installed((plugins, self.root/'missing')))
+        (plugins/'libgstlibav.so').write_bytes(b'')
+        self.assertTrue(onboard.h264_decoder_installed((self.root/'missing', plugins)))
 
     def test_desktop_entry_quotes_paths(self):
         self.assertEqual(onboard.desktop_quote('/plain/path'), '/plain/path')
@@ -124,7 +157,7 @@ class OnboardTests(unittest.TestCase):
              self.assertRaisesRegex(RuntimeError, 'Downloads'):
             onboard.prepare(self.root/'config.json')
         installer = self.root/'setup.exe'; installer.write_bytes(b'installer')
-        with patch.dict(onboard.LOCK, {'installer_sha256': sha(installer)}), \
+        with patch.dict(onboard.LOCK, {'crealityscan': [release('4.3.3', installer)]}), \
              patch('onboard.detect_gpu', return_value=None), \
              self.assertRaisesRegex(RuntimeError, 'OpenCL'):
             onboard.prepare(self.root/'config.json', installer)

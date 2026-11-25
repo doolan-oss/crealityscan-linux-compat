@@ -57,6 +57,22 @@ class SetupTests(unittest.TestCase):
                     common.dependencies(c)
                 (dxvk/'dxgi.dll').write_bytes(b'new dxgi')
                 with self.assertRaisesRegex(RuntimeError,'DXVK'):common.dependencies(c)
+    def test_every_pinned_installer_accepted(self):
+        import common,re
+        for r in common.LOCK['crealityscan']:
+            self.assertEqual(set(r),{'version','installer_sha256','sdk_sha256'})
+            self.assertTrue(all(re.fullmatch('[0-9a-f]{64}',r[k]) for k in ('installer_sha256','sdk_sha256')))
+        with tempfile.TemporaryDirectory()as d:
+            d=Path(d);(d/'d3d11.dll').write_bytes(b'd3d11')
+            new,old,other=(d/'new.exe',d/'old.exe',d/'other.exe')
+            for f in (new,old,other):f.write_bytes(f.name.encode())
+            lock={'dxvk':{'d3d11.dll':common.digest(d/'d3d11.dll')},'dxvk_also_accepted':[],
+                  'crealityscan':[{'version':v,'installer_sha256':common.digest(f),'sdk_sha256':'0'*64} for v,f in (('4.3.3',new),('4.3.2',old))]}
+            with patch.dict(common.LOCK,lock),patch('common.tree_digest',return_value=common.LOCK['runner_tree_sha256']),patch('common.expect'):
+                for f in (new,old):common.dependencies({'runner':d,'dxvk_dir':d,'installer':f},installer=True)
+                self.assertEqual(common.release(old)['version'],'4.3.2')
+                self.assertIsNone(common.release(other))
+                with self.assertRaisesRegex(RuntimeError,'other.exe'):common.dependencies({'runner':d,'dxvk_dir':d,'installer':other},installer=True)
     def test_cli_help_from_other_directory(self):
         r=subprocess.run([sys.executable,str(ROOT/'scripts/creality.py'),'--help'],cwd='/tmp',capture_output=True)
         self.assertEqual(r.returncode,0)
