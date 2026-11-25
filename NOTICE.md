@@ -25,6 +25,8 @@ https://github.com/wine-mirror/wine
 
 Standalone runner provider and its source/build information:
 https://github.com/Kron4ek/Wine-Builds
+(the tested build is mirrored unmodified, with its source, in this repository's
+`wine-runner-v1` release; see THIRD_PARTY_NOTICES.md)
 
 DXVK source and licensing:
 https://github.com/doitsujin/dxvk

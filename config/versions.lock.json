@@ -3,7 +3,7 @@
   "installer_sha256": "03135d3fbdb20947332723206169e5945df7c9989461507e1f36d128dd385b20",
   "sdk_sha256": "d36c0e8ea1e2123c5bc8288d8676608da255bffd8063e2b051dcf39c3fa79231",
   "runner_version": "wine-11.0-g8c33a428032 (Proton)",
-  "runner_archive_url": "https://github.com/Kron4ek/Wine-Builds/releases/download/proton-exp-11.0/wine-proton-exp-11.0-amd64.tar.xz",
+  "runner_archive_url": "https://github.com/doolan-oss/crealityscan-linux-compat/releases/download/wine-runner-v1/wine-proton-exp-11.0-amd64.tar.xz",
   "runner_archive_sha256": "75397ffd9d5af889a81209be138a5891d222fc17dc6ca40009df2e8cd2838136",
   "wine_sha256": "15aac501516cb973e29ab32456eed4ca684fb023521a8a885b47856a1fbf3f75",
   "wineserver_sha256": "6e635fe78cafbb1eb2bb6ab83b4a9b2cc4f8165037b6aa8fc6f7714d84bbce94",
