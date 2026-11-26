@@ -137,7 +137,9 @@ class OnboardTests(unittest.TestCase):
         (rules/'70-creality-pika.rules').write_text('SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2BC5", ATTRS{idProduct}=="0C06", TAG+="uaccess"\n')
         self.assertTrue(installed('0c06'))
 
-    def test_setup_checks_real_access_of_connected_scanners(self):
+    # With a decoder present, so its install hint (also a sudo command) depends on nothing on the host.
+    @patch('onboard.h264_decoder_installed', return_value=True)
+    def test_setup_checks_real_access_of_connected_scanners(self, _decoder):
         import usb
         sys.path.insert(0, str(ROOT/'tests'))
         import fakesysfs
@@ -161,6 +163,13 @@ class OnboardTests(unittest.TestCase):
              patch('onboard.udev_rule_installed', return_value=False), patch('sys.stdout', io.StringIO()) as out:
             onboard.finish(self.root/'config.json')
         self.assertNotIn('sudo', out.getvalue())  # access works: nothing to fix
+        _decoder.return_value = False
+        with patch.object(usb, 'V4L', self.root/'class/video4linux'), patch.object(usb, 'HIDRAW', self.root/'class/hidraw'), \
+             patch('usb.os.access', return_value=True), patch('onboard.desktop_entry', return_value=self.root/'entry'), \
+             patch('onboard.udev_rule_installed', return_value=False), patch('sys.stdout', io.StringIO()) as out:
+            onboard.finish(self.root/'config.json')
+        self.assertIn(onboard.H264_HINT, out.getvalue())
+        self.assertNotIn(onboard.access_command(), out.getvalue())
 
     def test_desktop_notification_escapes_markup(self):
         import creality
