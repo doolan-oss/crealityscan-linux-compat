@@ -33,6 +33,28 @@ OTTER_SURVEY = """
 # not known yet; these masks are assumptions.
 OTTER_UNITS = (((4, PIKA_GUID, 0x07),), ((8, ORBB_1_GUID, 0x03),), ((12, ORBB_2_GUID, 0x03),))
 
+# Camera nodes and formats of the CR-Scan Raptor, verbatim from the survey in issue #13.
+RAPTOR_SURVEY = """
+  /dev/video4 "CR-Scan Raptor: CR-Scan Raptor" index 0
+    capture GREY (8-bit Greyscale): 960x600@90/60/50/40/30/20/15/10, 1280x800@60/50/40/30/20/15/10/5, 1520x1200@60/50/40/30/20, 1920x1200@50/40/30/25/20/15/10/5, 1600x1000@60/40/30/20/15, 480x300@60/30/20/15/10
+    capture MJPG (Motion-JPEG): 960x600@90/30/20/15/10, 1280x800@60/30/20/15/10, 1520x1200@60/50/40/30/20, 1920x1200@50/40/30/20/15, 480x300@90/30/20/15/10, 1600x1000@60/45/30/15/5
+  /dev/video5 "CR-Scan Raptor: CR-Scan Raptor" index 1
+    metadata UVCH (UVC Payload Header Metadata): -
+  /dev/video6 "CR-Scan Raptor: CR-Scan Raptor" index 0
+    capture GREY (8-bit Greyscale): 960x600@90/60/50/40/30/20/15/10, 1280x800@60/50/40/30/20/15/10/5, 1520x1200@60/50/40/30/20, 1920x1200@50/40/30/25/20/15/10/5, 1600x1000@60/40/30/20/15
+    capture MJPG (Motion-JPEG): 960x600@90/30/20/15/10, 1280x800@60/30/20/15/10, 1520x1200@60/50/40/30/20, 1920x1200@50/40/30/20/15
+  /dev/video7 "CR-Scan Raptor: CR-Scan Raptor" index 1
+    metadata UVCH (UVC Payload Header Metadata): -
+  /dev/video8 "CR-Scan Raptor: CR-Scan Raptor" index 0
+    capture YUYV (YUYV 4:2:2): 1280x800@30/20/15/10/5, 640x400@30/20/15/10/5
+    capture MJPG (Motion-JPEG): 1280x800@60/50/30/25/20/15/10/5, 640x400@30/20/15/10/5
+  /dev/video9 "CR-Scan Raptor: CR-Scan Raptor" index 1
+    metadata UVCH (UVC Payload Header Metadata): -
+"""
+# Issue #13's survey lists units 4, 8 and 12, like the Otter's; one per camera
+# is assumed, and the selector masks are assumptions too.
+RAPTOR_UNITS = OTTER_UNITS
+
 # Camera nodes and formats of the Sermoon S1, verbatim from the survey in issue #7.
 S1_SURVEY = """
   /dev/video2 "Creality Sermoon S1: Creality S" index 0
@@ -148,6 +170,12 @@ def scanner(root, pid=0x0c06, product='Creality Sermoon S1', names=('Creality Se
 def pika(root):
     return scanner(root, 0x0c0b, 'Creality Pika', ('Creality Pika Depth Camera', 'Creality Pika RGB Camera'),
                    ((4, PIKA_GUID, 0x07),), 'AB12CD34EF', 0)
+
+
+def raptor(root, per_camera=RAPTOR_UNITS, raw=None):
+    """The CR-Scan Raptor of issue #13: three cameras sharing one name, nodes from video4, HID hidraw6."""
+    return scanner(root, 0x06a8, 'CR-Scan Raptor', 3 * ('CR-Scan Raptor',), serial='RAPTOR9SERIAL', first_node=4,
+                   per_camera=per_camera, raw=raw, revision='0001', hidraw='hidraw6')
 
 
 def otter(root, per_camera=OTTER_UNITS, raw=None):

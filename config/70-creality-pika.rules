@@ -7,3 +7,6 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c06", TAG+="ua
 # Creality CR-Scan Otter (experimental support).
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="06da", TAG+="uaccess"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="06da", TAG+="uaccess"
+# Creality CR-Scan Raptor (experimental support).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="06a8", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="06a8", TAG+="uaccess"

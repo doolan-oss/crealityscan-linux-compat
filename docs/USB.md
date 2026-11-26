@@ -19,6 +19,7 @@ the bridge used before profiles existed.
 | Creality Pika | 2bc5:0c0b | Supported |
 | Creality Sermoon S1 | 2bc5:0c06 | Experimental, untested; off by default |
 | Creality CR-Scan Otter | 2bc5:06da | Experimental, untested; off by default; needs helpers-v3 or newer |
+| Creality CR-Scan Raptor | 2bc5:06a8 | Experimental, untested; off by default; needs helpers-v3 or newer |
 
 The Sermoon S1 profile comes from a user's `survey` report: the same interface
 layout and unit-4 extension unit as the Pika, an extra unit 6 (which the SDK is
@@ -43,6 +44,19 @@ bridge gives each Otter camera only its own units, in its own descriptor order
 (`PIKA_XU_0`, `_1`, `_2`). Y10 frames are passed on exactly as the camera sends
 them, and frames that arrive without UVC metadata are passed on (and logged)
 instead of refused. To try it, run `python3 scripts/creality.py experimental otter`.
+
+The CR-Scan Raptor profile comes from the `survey` report in issue #13. Like
+the Otter it has three cameras (left IR, right IR and colour at interfaces 0, 2
+and 4, HID at 6) and extension units 4, 8 and 12, so it uses the same
+per-camera units. Unlike the Otter every camera has a UVC metadata node, so
+frames without metadata are refused as on the Pika. The IR cameras offer only
+their GREY modes and not 1280x800: the owner's native capture showed incomplete
+1280x800 frames and headerless MJPEG frames from the left camera. The SDK's own
+Raptor defaults (both IR cameras at 1920x1200, 50 fps) are offered. The left
+camera also lists a 14-bit format (`Y14`) that uvcvideo does not expose. The
+owner also found that an ASMedia ASM2142 card behind a VIA VL822 hub dropped
+left-camera frames, so use a port on the mainboard's own USB controller. To try
+it, run `python3 scripts/creality.py experimental raptor`.
 
 Each USB launch writes `scanner.txt` (model,
 profile, each camera's extension units and the controls they list, camera
@@ -70,7 +84,7 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0c0b", TAG+="ua
 ```
 
 `config/70-creality-pika.rules` contains these lines and the same two for the
-Sermoon S1 (`0c06`) and the CR-Scan Otter (`06da`). Desktop sessions usually get camera access automatically,
+Sermoon S1 (`0c06`), the CR-Scan Otter (`06da`) and the CR-Scan Raptor (`06a8`). Desktop sessions usually get camera access automatically,
 but not HID access, which is why the rule is needed. Setup and each USB launch
 check that you can open the connected scanner's camera and HID nodes. If you
 can't, they name the blocked nodes and give the command that installs the rule;

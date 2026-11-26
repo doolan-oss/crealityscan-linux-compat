@@ -46,6 +46,17 @@ OTTER_MONO = (*(('Y10 ', w, h, OTTER_RATES) for w, h in ((320, 200), (640, 400),
               *(('MJPG', w, h, OTTER_RATES) for w, h in ((320, 200), (640, 400), (1280, 800))))
 OTTER_COLOUR_SIZES = ((320, 240), (640, 480), (1280, 720), (1280, 960), (1920, 1080), (640, 360), (1280, 800))
 
+# The Raptor's two IR cameras (issue #13), in the order each lists them, minus
+# what its owner found broken in native capture: the left camera's 1280x800 GREY
+# frames arrive incomplete, so neither camera offers that size (the SDK pairs
+# left and right), and its MJPG frames have no JPEG header, so neither offers MJPG.
+RAPTOR_IR_LEFT = (('GREY', 960, 600, (90, 60, 50, 40, 30, 20, 15, 10)), ('GREY', 1520, 1200, (60, 50, 40, 30, 20)),
+                  ('GREY', 1920, 1200, (50, 40, 30, 25, 20, 15, 10, 5)), ('GREY', 1600, 1000, (60, 40, 30, 20, 15)),
+                  ('GREY', 480, 300, (60, 30, 20, 15, 10)))
+RAPTOR_IR_RIGHT = RAPTOR_IR_LEFT[:4]
+RAPTOR_COLOUR = (('YUYV', 1280, 800, (30, 20, 15, 10, 5)), ('YUYV', 640, 400, (30, 20, 15, 10, 5)),
+                 ('MJPG', 1280, 800, (60, 50, 30, 25, 20, 15, 10, 5)), ('MJPG', 640, 400, (30, 20, 15, 10, 5)))
+
 MODELS = {m.key: m for m in (
     Model('pika', 'Creality Pika', 'Pika', '0c0b', ((4, PIKA_XU_GUID),), (
         (('GREY', 1280, 960, PIKA_IR), ('MJPG', 1280, 960, PIKA_IR)),
@@ -69,6 +80,14 @@ MODELS = {m.key: m for m in (
                        *(('MJPG', w, h, OTTER_RATES) for w, h in OTTER_COLOUR_SIZES)))),
           experimental=True, note='untested: no Otter owner has reported a scan yet',
           units_per_camera=True, needs_metadata=False),
+    # From the survey in issue #13: left IR, right IR and colour cameras, the
+    # Otter's three extension units and UVC metadata on every camera. The SDK's
+    # Raptor defaults are both IR cameras at 1920x1200 50 fps and colour at 1280x800.
+    Model('raptor', 'Creality CR-Scan Raptor', 'CR-Scan Raptor', '06a8',
+          ((4, PIKA_XU_GUID), (8, ORBB_1_GUID), (12, ORBB_2_GUID)),
+          (RAPTOR_IR_LEFT, RAPTOR_IR_RIGHT, decoded(RAPTOR_COLOUR)),
+          experimental=True, note='untested: no Raptor owner has reported a scan yet',
+          units_per_camera=True),
 )}
 BY_PID = {m.pid: m for m in MODELS.values()}
 

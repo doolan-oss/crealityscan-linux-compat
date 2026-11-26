@@ -19,7 +19,7 @@ import models
 import survey
 import usb
 
-PIKA, S1, OTTER = models.MODELS['pika'], models.MODELS['sermoon-s1'], models.MODELS['otter']
+PIKA, S1, OTTER, RAPTOR = (models.MODELS[k] for k in ('pika', 'sermoon-s1', 'otter', 'raptor'))
 U4, U8, U12 = (g.hex() for g in (fakesysfs.PIKA_GUID, fakesysfs.ORBB_1_GUID, fakesysfs.ORBB_2_GUID))
 # Every variable models.environment() set for two-camera models before the Otter;
 # the bridge's defaults cover the rest, so these must stay all there is.
@@ -107,6 +107,21 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(decoded, 2 * [m[1:] for m in OTTER.modes[2] if m[0] == 'MJPG'])
         self.assertEqual((OTTER.pid, OTTER.experimental, OTTER.units_per_camera, OTTER.needs_metadata), ('06da', True, True, False))
         self.assertEqual(models.camera_keys(OTTER), ['0:0', '0:1', '2:0', '2:1', '4:0', '4:1'])
+
+    def test_raptor_profile_matches_the_reported_camera_formats_minus_broken_modes(self):
+        listed = fakesysfs.formats_from_survey(fakesysfs.RAPTOR_SURVEY)
+        for endpoint, node in enumerate(('/dev/video4', '/dev/video6', '/dev/video8')):
+            camera = [(f, w, h, tuple(map(round, rates))) for _, f, _, sizes in listed[node] for w, h, rates in sizes]
+            if endpoint < 2:  # IR: no MJPG and no 1280x800 (incomplete frames on the left camera)
+                camera = [m for m in camera if m[0] == 'GREY' and m[1:3] != (1280, 800)]
+            native = [m for m in RAPTOR.modes[endpoint] if m[0] not in ('NV12', 'BGR3')]
+            self.assertEqual(native, camera)
+        # The SDK's Raptor defaults are offered: both IR cameras at 1920x1200 50 fps, colour at 1280x800 10 fps.
+        for endpoint in (0, 1):
+            self.assertIn(50, dict(((m[1], m[2]), m[3]) for m in RAPTOR.modes[endpoint])[(1920, 1200)])
+        self.assertIn(('BGR3', 1280, 800, (60, 50, 30, 25, 20, 15, 10, 5)), RAPTOR.modes[2])
+        self.assertEqual((RAPTOR.pid, RAPTOR.experimental, RAPTOR.units_per_camera, RAPTOR.needs_metadata), ('06a8', True, True, True))
+        self.assertEqual(models.BY_PID['06a8'], RAPTOR)
 
     def test_otter_cameras_each_get_their_own_extension_units(self):
         e = models.environment(OTTER, fakesysfs.descriptors(0x06da, None, per_camera=fakesysfs.OTTER_UNITS))
@@ -365,6 +380,26 @@ class LaunchTests(unittest.TestCase):
         self.config['experimental_scanners'] = ['sermoon-s1']
         with self.assertRaisesRegex(RuntimeError, 'do not support the Creality Sermoon S1.*setup'):
             self.prepare(device, helper_ok=False)
+
+    def test_raptor_needs_the_experimental_setting(self):
+        fakesysfs.raptor(self.root)
+        with self.assertRaisesRegex(RuntimeError, r'CR-Scan Raptor is experimental.*creality.py experimental raptor'):
+            self.prepare(None)
+
+    def test_raptor_launch_environment(self):
+        device = fakesysfs.raptor(self.root)
+        self.config['experimental_scanners'] = ['raptor']
+        e, nodes = self.prepare(device, fakesysfs.formats_from_survey(fakesysfs.RAPTOR_SURVEY))
+        self.assertEqual((e['PIKA_USB_PID'], e['PIKA_MODEL_NAME'], e['PIKA_CAMERAS']), ('06a8', 'CR-Scan Raptor', '3'))
+        self.assertNotIn('PIKA_METADATA_REQUIRED', e)  # every Raptor camera has a metadata node, as on the Pika
+        self.assertEqual([e[f'PIKA_NODE_{n}'] for n in range(3)], ['/dev/video4', '/dev/video6', '/dev/video8'])
+        self.assertEqual([e[f'PIKA_METADATA_{n}'] for n in range(3)], ['/dev/video5', '/dev/video7', '/dev/video9'])
+        self.assertEqual((e['PIKA_XU_0'], e['PIKA_XU_1'], e['PIKA_XU_2']), (f'4:{U4}:7', f'8:{U8}:3', f'12:{U12}:3'))
+        self.assertEqual(nodes, [f'/dev/video{n}' for n in range(4, 10)] + ['/dev/hidraw6'])
+        report = (self.log/'scanner.txt').read_text()
+        self.assertIn('Scanner: Creality CR-Scan Raptor (experimental), USB 2bc5:06a8', report)
+        self.assertNotIn('does not list', report)
+        self.assertNotIn('RAPTOR9SERIAL', report)
 
     def test_otter_needs_the_experimental_setting(self):
         fakesysfs.otter(self.root)

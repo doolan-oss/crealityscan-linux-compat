@@ -1,5 +1,8 @@
 # Compatibility and acceptance boundaries
 
+CrealityScan 4.3.3 (November 2026) installs, passes diagnostics and starts with
+the unchanged bridge; live scanning with it is not yet reported, including
+whether the blue-laser OpenCL fix still matches its kernel (see VALIDATION.md).
 Known original setup: CrealityScan 4.3.2, SDK 3.5.3.260921, Pika firmware 1.1.1,
 CachyOS x86-64, RX 6800 XT, ROCm OpenCL, standalone Wine 11 with Proton 11.0's
 DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since
@@ -9,10 +12,10 @@ on Ubuntu 24.04 and need glibc 2.39 or newer; GPU detection in setup picks one G
 `--gpu-name`. NVIDIA: one user's T600 laptop GPU (TUXEDO OS, KDE Wayland) passed
 setup and diagnostics with NVIDIA device access and PRIME offload; scanning on
 NVIDIA is not yet reported, and the RX 6800 XT allocation fix does not apply.
-USB support covers the Pika (USB ID 2bc5:0c0b). The Sermoon S1 (2bc5:0c06) and
-the CR-Scan Otter (2bc5:06da) have experimental profiles built from owners'
-survey reports, untested on the hardware and off by default (see USB.md); the
-Otter is the first model with three cameras. With another Creality scanner
+USB support covers the Pika (USB ID 2bc5:0c0b). The Sermoon S1 (2bc5:0c06),
+the CR-Scan Otter (2bc5:06da) and the CR-Scan Raptor (2bc5:06a8) have experimental
+profiles built from owners' survey reports, untested on the hardware and off by
+default (see USB.md); the Otter and Raptor have three cameras. With another Creality scanner
 connected, USB launch stops with a message pointing to `creality.py survey`, a
 read-only report owners can share to help add support.
 Other scanners, firmware, GPU families, OpenCL stacks and app versions are not
