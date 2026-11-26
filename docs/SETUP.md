@@ -71,7 +71,9 @@ system packages, drivers, udev rules or firewall rules.
 2. The standalone **Kron4ek Proton Experimental 11.0 amd64** Wine distribution and
    the official **DXVK 3.1.1** release. `python3 scripts/creality.py fetch`
    downloads both (pinned URLs and SHA-256 in the lockfile) and prints their
-   paths for `configure`. `runner` is the directory containing `bin/wine`,
+   paths for `configure`. Kron4ek rebuilds `proton-exp-11.0` in place from time
+   to time, so the tested build is downloaded from this repository's
+   `wine-runner-v1` release, an unmodified copy of Kron4ek's archive. `runner` is the directory containing `bin/wine`,
    `include/wine` and `lib/wine`; `dxvk_dir` is the release's `x64` folder.
    Every launch verifies the complete runner file/link inventory against
    `runner_tree_sha256`; extra files or modified runner libraries are refused.
