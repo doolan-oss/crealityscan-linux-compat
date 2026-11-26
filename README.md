@@ -66,9 +66,9 @@ To uninstall, delete `~/.local/share/crealityscan-linux`,
 
 ## Other Creality scanners
 
-Only the **Creality Pika** is known to work so far. The **Sermoon S1** and the
-**CR-Scan Otter** have experimental support: if you have one, run
-`python3 scripts/creality.py experimental sermoon-s1` (or `... experimental otter`) once, start CrealityScan,
+Only the **Creality Pika** is known to work so far. The **Sermoon S1**,
+**CR-Scan Otter** and **CR-Scan Raptor** have experimental support: if you have one, run
+`python3 scripts/creality.py experimental sermoon-s1` (or `... experimental otter`, `... experimental raptor`) once, start CrealityScan,
 then run `python3 scripts/creality.py logs` and attach the zip file it saves to
 your hardware report, whether or not scanning worked (see [USB.md](docs/USB.md)).
 With another scanner connected the app stops with a message saying so.
