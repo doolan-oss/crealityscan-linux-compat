@@ -1,5 +1,8 @@
 # Compatibility and acceptance boundaries
 
+CrealityScan 4.3.3 (November 2026) installs, passes diagnostics and starts with
+the unchanged bridge; live scanning with it is not yet reported, including
+whether the blue-laser OpenCL fix still matches its kernel (see VALIDATION.md).
 Known original setup: CrealityScan 4.3.2, SDK 3.5.3.260921, Pika firmware 1.1.1,
 CachyOS x86-64, RX 6800 XT, ROCm OpenCL, standalone Wine 11 with Proton 11.0's
 DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since
